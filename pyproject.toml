@@ -1,0 +1,18 @@
+[project]
+name = "nomos"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipyleaflet>=0.20.0",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
+    "scikit-learn>=1.7.2",
+    "traffic>=2.13",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+]
