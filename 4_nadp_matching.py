@@ -1,11 +1,11 @@
 """
 
-This script processes aircraft climb trajectory data to classify flights 
-into NADP1 and NADP2 departure procedures using unsupervised clustering. 
-It loads trajectory data, extracts the significant climb phase for each flight, 
-and applies KMeans clustering to group similar climb profiles. 
+This script processes aircraft climb trajectory data to classify flights
+into NADP1 and NADP2 departure procedures using unsupervised clustering.
+It loads trajectory data, extracts the significant climb phase for each flight,
+and applies KMeans clustering to group similar climb profiles.
 
-The clusters are then mapped to NADP types based on vertical rate characteristics, 
+The clusters are then mapped to NADP types based on vertical rate characteristics,
 and the results are visualized and exported for further analysis.
 
 Steps:
@@ -22,6 +22,7 @@ Steps:
 
 # %%
 import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -30,6 +31,9 @@ from traffic.core import Flight, Traffic
 
 # Create plots directory if it doesn't exist
 os.makedirs("plots", exist_ok=True)
+
+# increase matplotlib font size
+plt.rcParams.update({"font.size": 16})
 
 # %%
 t = Traffic.from_file("data/nadp_trajectories.parquet")
@@ -84,9 +88,11 @@ print(f"Cluster 1 count: {np.sum(labels == 1)}")
 
 # %%
 # Merge cluster labels with flight data
-t_nadp = t_initial_climb.merge(pd.DataFrame(dict(flight_id=t.flight_ids, cluster_label=labels)))
+t_nadp = t_initial_climb.merge(
+    pd.DataFrame(dict(flight_id=t.flight_ids, cluster_label=labels))
+)
 
-#%%
+# %%
 # Determine which cluster is NADP1 and NADP2 based on mean vertical rate before FL25
 vs_0_mean = t_nadp.query("altitude<2500 and cluster_label==0").data.vertical_rate.mean()
 vs_1_mean = t_nadp.query("altitude<2500 and cluster_label==1").data.vertical_rate.mean()
@@ -117,8 +123,8 @@ df_nadp.to_csv("data/flight_id_nadp.csv", index=False)
 nadp1_count = df_nadp[df_nadp.nadp == "nadp1"].shape[0]
 nadp2_count = df_nadp[df_nadp.nadp == "nadp2"].shape[0]
 print(f"\nFinal NADP classification:")
-print(f"NADP1 flights: {nadp1_count} ({nadp1_count/len(df_nadp)*100:.1f}%)")
-print(f"NADP2 flights: {nadp2_count} ({nadp2_count/len(df_nadp)*100:.1f}%)")
+print(f"NADP1 flights: {nadp1_count} ({nadp1_count / len(df_nadp) * 100:.1f}%)")
+print(f"NADP2 flights: {nadp2_count} ({nadp2_count / len(df_nadp) * 100:.1f}%)")
 print(f"Total classified: {len(df_nadp)}")
 
 t_nadp = t_initial_climb.merge(df_nadp)
@@ -141,7 +147,7 @@ plt.tight_layout()
 
 
 # %%
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 12), sharex=True)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
 
 for i, f in enumerate(t_nadp.query("nadp=='nadp1' and 800<altitude<3000")[:500]):
     ax1.plot(f.data.ts, f.data.altitude, lw=1, color="tab:blue", alpha=0.2)
