@@ -57,9 +57,10 @@ IAS_WEIGHTS = np.array([1 / 30, 1 / 30, 1 / 30])
 
 # Maximum allowed ratio (closer / farther) to classify a flight.
 # Ratio ranges from 0 (one reference is perfect match) to 1 (equidistant).
-# E.g., 0.6 means the flight must be at least 40% closer to one reference
-# than the other; above this ratio, the flight is marked as unknown.
-SEPARATION_THRESHOLD = 0.6
+# Asymmetric: NADP1 cluster is tight so we use a stricter threshold;
+# NADP2 is more spread out so we allow a higher ratio.
+NADP1_THRESHOLD = 0.4
+NADP2_THRESHOLD = 0.9
 
 
 def classify_flight(row):
@@ -67,6 +68,7 @@ def classify_flight(row):
 
     Computes distance to both NADP1 and NADP2 reference IAS profiles.
     Only classifies if the two distances are sufficiently different.
+    Uses asymmetric thresholds: stricter for NADP1, more relaxed for NADP2.
     """
     ias_features = np.array([
         row["delta_ias_800"],
@@ -80,13 +82,18 @@ def classify_flight(row):
     closer = min(dist_nadp1, dist_nadp2)
     farther = max(dist_nadp1, dist_nadp2)
 
-    # If the two distances are too similar, mark as unknown
-    if farther == 0 or closer / farther > SEPARATION_THRESHOLD:
+    if farther == 0:
         return ("unknown", dist_nadp1, dist_nadp2)
 
+    ratio = closer / farther
+
     if dist_nadp1 < dist_nadp2:
+        if ratio > NADP1_THRESHOLD:
+            return ("unknown", dist_nadp1, dist_nadp2)
         return ("nadp1", dist_nadp1, dist_nadp2)
     else:
+        if ratio > NADP2_THRESHOLD:
+            return ("unknown", dist_nadp1, dist_nadp2)
         return ("nadp2", dist_nadp1, dist_nadp2)
 
 
@@ -138,7 +145,7 @@ df["separation_ratio"] = df[["dist_nadp1", "dist_nadp2"]].min(axis=1) / df[["dis
 nadp1 = df[df["nadp_type"] == "nadp1"]
 nadp2 = df[df["nadp_type"] == "nadp2"]
 unknown = df[df["nadp_type"] == "unknown"]
-print(f"\nClassification results (separation threshold = {SEPARATION_THRESHOLD}):")
+print(f"\nClassification results (NADP1 threshold = {NADP1_THRESHOLD}, NADP2 threshold = {NADP2_THRESHOLD}):")
 print(f"  NADP1:   {len(nadp1)} flights ({len(nadp1)/len(df)*100:.1f}%)")
 print(f"  NADP2:   {len(nadp2)} flights ({len(nadp2)/len(df)*100:.1f}%)")
 print(f"  Unknown: {len(unknown)} flights ({len(unknown)/len(df)*100:.1f}%)")
@@ -247,49 +254,56 @@ plt.savefig("plots/02_speed_profiles_vs_reference.png", dpi=150)
 print("Saved plots/02_speed_profiles_vs_reference.png")
 
 
-# Plot 3: Separation ratio distribution (NADP1 drawn on top)
-fig, ax = plt.subplots(figsize=(10, 6))
-for label in ["unknown", "nadp2", "nadp1"]:
+# Plot 3: Separation ratio distribution (separate subplots per type)
+fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, sharey=True)
+for ax, label in zip(axes, ["nadp1", "nadp2", "unknown"]):
     subset = df[df["nadp_type"] == label]["separation_ratio"].dropna()
-    sns.histplot(subset, bins=50, alpha=0.5, label=label.upper(), color=PALETTE[label], ax=ax)
-ax.axvline(SEPARATION_THRESHOLD, color="k", ls="--", lw=1.5, label=f"Threshold ({SEPARATION_THRESHOLD})")
-ax.set_xlabel("Separation ratio (0 = perfect match, 1 = equidistant)")
-ax.set_ylabel("Number of flights")
-ax.set_title("Distance separation between NADP1 and NADP2 references")
-ax.legend()
+    sns.histplot(subset, bins=50, color=PALETTE[label], ax=ax)
+    ax.axvline(NADP1_THRESHOLD, color=PALETTE["nadp1"], ls="--", lw=1.5)
+    ax.axvline(NADP2_THRESHOLD, color=PALETTE["nadp2"], ls="--", lw=1.5)
+    ax.set_ylabel(f"{label.upper()}\ncount")
+    ax.set_xlabel("")
+axes[0].set_title("Separation ratio distribution by NADP type")
+axes[-1].set_xlabel("Separation ratio (0 = perfect match, 1 = equidistant)")
 plt.tight_layout()
 plt.savefig("plots/03_separation_ratio.png", dpi=150)
 print("Saved plots/03_separation_ratio.png")
 
 
-# Plot 3b: Varying separation thresholds
-thresholds = [0.4, 0.5, 0.6, 0.7, 0.8]
-fig, axes = plt.subplots(1, len(thresholds), figsize=(5 * len(thresholds), 5), sharey=True)
+# Plot 3b: Varying asymmetric separation thresholds
+threshold_pairs = [(0.3, 0.5), (0.4, 0.6), (0.4, 0.7), (0.5, 0.7), (0.5, 0.8)]
+fig, axes = plt.subplots(1, len(threshold_pairs), figsize=(5 * len(threshold_pairs), 5), sharey=True)
 
-for ax, thresh in zip(axes, thresholds):
+for ax, (t1, t2) in zip(axes, threshold_pairs):
     n1, n2, nu = 0, 0, 0
     for _, row in df.iterrows():
         d1, d2 = row["dist_nadp1"], row["dist_nadp2"]
         closer, farther = min(d1, d2), max(d1, d2)
-        if farther == 0 or closer / farther > thresh:
+        if farther == 0:
             nu += 1
         elif d1 < d2:
-            n1 += 1
+            nu += 1 if closer / farther > t1 else 0
+            n1 += 0 if closer / farther > t1 else 1
         else:
-            n2 += 1
+            nu += 1 if closer / farther > t2 else 0
+            n2 += 0 if closer / farther > t2 else 1
     total = n1 + n2 + nu
     bars = ax.barh(
         ["NADP1", "NADP2", "Unknown"], [n1, n2, nu],
         color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]],
     )
-    ax.set_title(f"Threshold = {thresh}")
+    is_current = (t1 == NADP1_THRESHOLD and t2 == NADP2_THRESHOLD)
+    title = f"NADP1={t1}, NADP2={t2}"
+    if is_current:
+        title += " (current)"
+    ax.set_title(title)
     ax.set_xlim(0, len(df) * 1.15)
     for bar, count in zip(bars, [n1, n2, nu]):
         ax.text(count + len(df) * 0.01, bar.get_y() + bar.get_height() / 2,
                 f"{count} ({count/total*100:.0f}%)", va="center", fontsize=10)
 
 axes[0].set_ylabel("Category")
-plt.suptitle("Classification results at varying separation thresholds")
+plt.suptitle("Classification results at varying asymmetric thresholds")
 plt.tight_layout()
 plt.savefig("plots/03b_threshold_sensitivity.png", dpi=150)
 print("Saved plots/03b_threshold_sensitivity.png")
