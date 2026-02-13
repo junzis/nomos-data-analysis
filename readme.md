@@ -154,6 +154,8 @@ Three best and three worst flights per type, compared to the reference profiles 
 
 ![Best vs worst reference comparison](plots/04_reference_comparison.png)
 
+The worst NADP1 matches are all heavy B777 variants (B77W, B77L) with V2 around 194-197 kt. Their speed profiles start accelerating before 3000 ft rather than holding flat, so they don't follow the NADP1 reference as closely (delta ~17-19 kt RMS). The worst NADP2 matches are lighter aircraft (B737, E295) with low V2 values (143-154 kt) that accelerate well beyond the reference curve, reaching 80-100 kt above V2 (delta ~41-45 kt RMS).
+
 ## Output
 
 `data/nadp_results.csv`, one row per flight:

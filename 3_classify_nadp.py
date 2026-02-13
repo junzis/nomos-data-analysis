@@ -271,10 +271,10 @@ print("Saved plots/03_separation_ratio.png")
 
 
 # Plot 3b: Varying asymmetric separation thresholds
-threshold_pairs = [(0.3, 0.5), (0.4, 0.6), (0.4, 0.7), (0.5, 0.7), (0.5, 0.8)]
-fig, axes = plt.subplots(1, len(threshold_pairs), figsize=(5 * len(threshold_pairs), 5), sharey=True)
+threshold_pairs = [(0.3, 0.7), (0.3, 0.9), (0.4, 0.7), (0.4, 0.9), (0.5, 0.8), (0.5, 0.9)]
+fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharey=True)
 
-for ax, (t1, t2) in zip(axes, threshold_pairs):
+for ax, (t1, t2) in zip(axes.flat, threshold_pairs):
     n1, n2, nu = 0, 0, 0
     for _, row in df.iterrows():
         d1, d2 = row["dist_nadp1"], row["dist_nadp2"]
@@ -302,7 +302,8 @@ for ax, (t1, t2) in zip(axes, threshold_pairs):
         ax.text(count + len(df) * 0.01, bar.get_y() + bar.get_height() / 2,
                 f"{count} ({count/total*100:.0f}%)", va="center", fontsize=10)
 
-axes[0].set_ylabel("Category")
+for ax in axes[:, 0]:
+    ax.set_ylabel("Category")
 plt.suptitle("Classification results at varying asymmetric thresholds")
 plt.tight_layout()
 plt.savefig("plots/03b_threshold_sensitivity.png", dpi=150)
