@@ -34,32 +34,24 @@ def interpolate_at_altitude(group, column, target_alt):
 
 def extract_v2(group):
     """
-    Extract V2 (rotation speed) from a flight's ground roll data.
+    Extract V2 proxy from the initial climb segment.
 
-    Finds the last point where ALT < 50ft and ROCD transitions to > 1000 ft/min,
-    returns the IAS at that point.
+    Uses the minimum IAS in the 200-800ft altitude band as the V2 baseline.
+    This captures the stabilized initial climb speed rather than the rotation
+    speed (Vr), which is typically slightly higher due to the pitch-up transient.
     """
     df = group.sort_values("actual_time").reset_index(drop=True)
 
-    # Find points on or near the ground
-    ground = df[df["ALT"] < 50]
-    if ground.empty:
+    # Find points in the 200-800ft band
+    climb_band = df[(df["ALT"] >= 200) & (df["ALT"] <= 800)]
+    if climb_band.empty:
         return np.nan
 
-    airborne = df[df["ALT"] >= 50]
-    if airborne.empty:
+    ias_values = climb_band["EHS_IAS"].dropna()
+    if ias_values.empty:
         return np.nan
 
-    # Last ground point
-    last_ground_idx = ground.index[-1]
-    ias_at_rotation = df.loc[last_ground_idx, "EHS_IAS"]
-
-    if pd.isna(ias_at_rotation):
-        # Try the first airborne point instead
-        first_airborne_idx = airborne.index[0]
-        ias_at_rotation = df.loc[first_airborne_idx, "EHS_IAS"]
-
-    return ias_at_rotation
+    return ias_values.min()
 
 
 def extract_flight_features(flight_id, group):
@@ -104,7 +96,7 @@ def extract_flight_features(flight_id, group):
         return None
 
     # Altitude-indexed curves (every 100ft from 200 to 4000)
-    alt_grid = np.arange(200, 4100, 100)
+    alt_grid = np.arange(200, 3600, 100)
     ias_curve = [interpolate_at_altitude(airborne, "EHS_IAS", a) for a in alt_grid]
     rocd_curve = [interpolate_at_altitude(airborne, "EHS_ROCD", a) for a in alt_grid]
 

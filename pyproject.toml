@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",
     "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
     "traffic>=2.13",
 ]
 

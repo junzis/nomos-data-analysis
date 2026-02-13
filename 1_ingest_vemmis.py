@@ -1,7 +1,7 @@
 """
 Ingest VEMMIS enhanced surveillance data for EHAM departures.
 
-- Reads daily VEMMIS CSV files (first 7 days of March 2025).
+- Reads daily VEMMIS CSV files (March 2025).
 - Filters to EHAM departures only.
 - Extracts climb segments (ALT < 5000 ft).
 - Keeps relevant columns: flight tracking + EHS parameters.
@@ -12,7 +12,7 @@ import glob
 
 import pandas as pd
 
-files = sorted(glob.glob("data/vemmis_202503/vemmis_2025030[1-7].csv"))
+files = sorted(glob.glob("data/vemmis_202503/vemmis_202503*.csv"))
 print(f"Found {len(files)} VEMMIS files")
 
 # Read and concatenate all daily files
@@ -48,6 +48,20 @@ df = df[cols].copy()
 
 # Sort by flight and time
 df = df.sort_values(["FLIGHT_ID", "actual_time"]).reset_index(drop=True)
+
+# Keep only the departure segment (first 500s from each flight's start)
+df["t_from_start"] = df.groupby("FLIGHT_ID")["actual_time"].transform(
+    lambda x: (x - x.min()).dt.total_seconds()
+)
+df = df[df["t_from_start"] <= 500].copy()
+df = df.drop(columns="t_from_start")
+print(f"Rows within 500s of departure: {len(df)}")
+
+# Remove flights that never reach 5000 ft within 500s (incomplete climbs)
+max_alt = df.groupby("FLIGHT_ID")["ALT"].max()
+full_departures = max_alt[max_alt >= 5000].index
+df = df[df["FLIGHT_ID"].isin(full_departures)].copy()
+print(f"Flights reaching 5000 ft within 500s: {len(full_departures)}")
 
 # Filter to climb segments: keep only rows below 5000 ft
 df = df[df["ALT"] < 5000].copy()
