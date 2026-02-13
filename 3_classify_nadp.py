@@ -247,9 +247,9 @@ plt.savefig("plots/02_speed_profiles_vs_reference.png", dpi=150)
 print("Saved plots/02_speed_profiles_vs_reference.png")
 
 
-# Plot 3: Separation ratio distribution
+# Plot 3: Separation ratio distribution (NADP1 drawn on top)
 fig, ax = plt.subplots(figsize=(10, 6))
-for label in ["nadp1", "nadp2", "unknown"]:
+for label in ["unknown", "nadp2", "nadp1"]:
     subset = df[df["nadp_type"] == label]["separation_ratio"].dropna()
     sns.histplot(subset, bins=50, alpha=0.5, label=label.upper(), color=PALETTE[label], ax=ax)
 ax.axvline(SEPARATION_THRESHOLD, color="k", ls="--", lw=1.5, label=f"Threshold ({SEPARATION_THRESHOLD})")
@@ -260,6 +260,39 @@ ax.legend()
 plt.tight_layout()
 plt.savefig("plots/03_separation_ratio.png", dpi=150)
 print("Saved plots/03_separation_ratio.png")
+
+
+# Plot 3b: Varying separation thresholds
+thresholds = [0.4, 0.5, 0.6, 0.7, 0.8]
+fig, axes = plt.subplots(1, len(thresholds), figsize=(5 * len(thresholds), 5), sharey=True)
+
+for ax, thresh in zip(axes, thresholds):
+    n1, n2, nu = 0, 0, 0
+    for _, row in df.iterrows():
+        d1, d2 = row["dist_nadp1"], row["dist_nadp2"]
+        closer, farther = min(d1, d2), max(d1, d2)
+        if farther == 0 or closer / farther > thresh:
+            nu += 1
+        elif d1 < d2:
+            n1 += 1
+        else:
+            n2 += 1
+    total = n1 + n2 + nu
+    bars = ax.barh(
+        ["NADP1", "NADP2", "Unknown"], [n1, n2, nu],
+        color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]],
+    )
+    ax.set_title(f"Threshold = {thresh}")
+    ax.set_xlim(0, len(df) * 1.15)
+    for bar, count in zip(bars, [n1, n2, nu]):
+        ax.text(count + len(df) * 0.01, bar.get_y() + bar.get_height() / 2,
+                f"{count} ({count/total*100:.0f}%)", va="center", fontsize=10)
+
+axes[0].set_ylabel("Category")
+plt.suptitle("Classification results at varying separation thresholds")
+plt.tight_layout()
+plt.savefig("plots/03b_threshold_sensitivity.png", dpi=150)
+print("Saved plots/03b_threshold_sensitivity.png")
 
 
 # Plot 4: Example flights vs reference (3 best + 3 worst per type, IAS + ROCD)
@@ -331,24 +364,7 @@ plt.savefig("plots/05_feature_space.png", dpi=150)
 print("Saved plots/05_feature_space.png")
 
 
-# Plot 6: Delta score distribution by NADP type (violin plot)
-classified = df[df["nadp_type"] != "unknown"].copy()
-classified["NADP type"] = classified["nadp_type"].str.upper()
-
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.violinplot(
-    data=classified, x="NADP type", y="delta_ias_rms", hue="NADP type", cut=0,
-    palette={"NADP1": PALETTE["nadp1"], "NADP2": PALETTE["nadp2"]},
-    legend=False, ax=ax,
-)
-ax.set_ylabel("IAS RMS deviation from reference (kt)")
-ax.set_title("Speed deviation from ICAO reference profiles")
-plt.tight_layout()
-plt.savefig("plots/06_delta_violin.png", dpi=150)
-print("Saved plots/06_delta_violin.png")
-
-
-# Plot 7: NADP type breakdown by aircraft type (top 15 most common)
+# Plot 6: NADP type breakdown by aircraft type (top 15 most common)
 top_types = df["icao_actype"].value_counts().head(15).index
 df_top = df[df["icao_actype"].isin(top_types)].copy()
 
@@ -364,18 +380,21 @@ ct.plot.barh(
 ax.set_xlabel("Proportion of flights")
 ax.set_ylabel("Aircraft type")
 ax.set_title("NADP classification by aircraft type (top 15)")
-ax.legend(["NADP1", "NADP2", "Unknown"], loc="lower right")
-# Add flight count annotations
+ax.legend(
+    ["NADP1", "NADP2", "Unknown"],
+    loc="upper center", bbox_to_anchor=(0.5, -0.08),
+    ncol=3, frameon=False,
+)
 counts = df_top["icao_actype"].value_counts()
 for i, actype in enumerate(ct.index):
     ax.text(1.02, i, f"n={counts[actype]}", va="center", fontsize=10)
 ax.set_xlim(0, 1.15)
 plt.tight_layout()
-plt.savefig("plots/07_actype_breakdown.png", dpi=150)
-print("Saved plots/07_actype_breakdown.png")
+plt.savefig("plots/06_actype_breakdown.png", dpi=150, bbox_inches="tight")
+print("Saved plots/06_actype_breakdown.png")
 
 
-# Plot 8: Mean IAS and ROCD profiles by NADP type with confidence bands
+# Plot 7: Mean IAS and ROCD profiles by NADP type with confidence bands
 fig, (ax_ias, ax_rocd) = plt.subplots(1, 2, figsize=(16, 8), sharey=True)
 
 for label, ref_ias in [("nadp1", NADP1_DELTA_IAS), ("nadp2", NADP2_DELTA_IAS)]:
@@ -412,5 +431,5 @@ ax_rocd.legend(loc="lower right")
 
 plt.suptitle("Mean profiles with IQR by NADP type")
 plt.tight_layout()
-plt.savefig("plots/08_mean_profiles.png", dpi=150)
-print("Saved plots/08_mean_profiles.png")
+plt.savefig("plots/07_mean_profiles.png", dpi=150)
+print("Saved plots/07_mean_profiles.png")

@@ -90,11 +90,9 @@ Zero means the flight perfectly follows the reference; higher values mean more d
 
 Three scripts, run in order:
 
-| Script | Input | Output | What it does |
-|--------|-------|--------|-------------|
-| `1_ingest_vemmis.py` | `data/vemmis_202503/*.csv` | `data/vemmis_departures.parquet` | Filters to EHAM departures, keeps climb segments below 5000 ft within 500 s of departure |
-| `2_extract_features.py` | `data/vemmis_departures.parquet` | `data/nadp_features.parquet` | Extracts V2, milestone features, and altitude-indexed speed/ROCD curves per flight |
-| `3_classify_nadp.py` | `data/nadp_features.parquet` | `data/nadp_results.csv` + `plots/` | Classifies flights, computes delta scores, generates plots |
+- `1_ingest_vemmis.py` — reads daily VEMMIS CSV files from `data/vemmis_202503/`, filters to EHAM departures, and keeps climb segments below 5000 ft within 500 s of departure. Output: `data/vemmis_departures.parquet`.
+- `2_extract_features.py` — extracts V2, milestone features, and altitude-indexed speed/ROCD curves per flight. Output: `data/nadp_features.parquet`.
+- `3_classify_nadp.py` — classifies flights, computes delta scores, and generates all plots. Output: `data/nadp_results.csv` and `plots/`.
 
 ```bash
 uv run python 1_ingest_vemmis.py
@@ -122,7 +120,7 @@ NADP1 flights climb more steeply. NADP2 flights have a more gradual, consistent 
 
 ### Speed and climb rate profiles
 
-Top row: IAS minus V2 versus altitude, with ICAO reference curves. NADP1 flights hold nearly constant speed through 3000 ft; NADP2 flights accelerate from 800 ft. Bottom row: the corresponding ROCD profiles. The NADP2 dip around 1000-1500 ft is where the aircraft trades climb rate for speed during flap retraction:
+Top row: IAS minus V2 versus altitude, with ICAO reference curves. NADP1 flights hold nearly constant speed through 3000 ft; NADP2 flights accelerate from 800 ft. Bottom row: the corresponding ROCD profiles. Vertical rates vary widely across aircraft types and weights, and the difference between NADP1 and NADP2 is much smaller than the scatter within each group. This is another reason we rely on speed alone for classification. The ROCD profiles are still useful for comparison though -- the NADP2 dip around 1000-1500 ft shows where the aircraft trades climb rate for speed during flap retraction:
 
 ![Speed and ROCD profiles](plots/02_speed_profiles_vs_reference.png)
 
@@ -130,7 +128,7 @@ Top row: IAS minus V2 versus altitude, with ICAO reference curves. NADP1 flights
 
 Mean speed and ROCD with interquartile range. The two procedures separate cleanly, and the ICAO reference curves sit close to the observed means:
 
-![Mean profiles with IQR](plots/08_mean_profiles.png)
+![Mean profiles with IQR](plots/07_mean_profiles.png)
 
 ### Separation ratio
 
@@ -138,17 +136,17 @@ Most classified flights have separation ratios well below 0.6. Flights above the
 
 ![Separation ratio distribution](plots/03_separation_ratio.png)
 
-### Delta score distribution
+### Threshold sensitivity
 
-IAS RMS deviation from reference. NADP1 flights match their reference a bit more closely (median ~8 kt) than NADP2 flights (median ~11 kt):
+The separation ratio threshold controls how strict the classifier is. Lower thresholds push more flights into "unknown"; higher thresholds classify more aggressively at the risk of misassignment. The figure below compares thresholds from 0.4 to 0.8. We use 0.6 as a balance between coverage and confidence:
 
-![Delta score violin plot](plots/06_delta_violin.png)
+![Threshold sensitivity](plots/03b_threshold_sensitivity.png)
 
 ### Aircraft type breakdown
 
 Wide-bodies (B77W, B789) have more NADP1 departures. Narrowbodies (B738, E295, B737) are almost all NADP2:
 
-![NADP by aircraft type](plots/07_actype_breakdown.png)
+![NADP by aircraft type](plots/06_actype_breakdown.png)
 
 ### Best and worst matches
 
