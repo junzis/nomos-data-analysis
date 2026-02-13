@@ -43,6 +43,20 @@ Data files should be placed in `data/vemmis_202503/` with the naming pattern `ve
 
 V2 (takeoff safety speed) varies per flight depending on aircraft weight, flap setting, and temperature. We extract a V2 proxy for each flight as the minimum IAS observed in the 200–800 ft altitude band. This captures the stabilized initial climb speed after the pitch-up transient following rotation, providing a clean baseline for computing speed deltas.
 
+### Why speed only — no climb rate
+
+The classification uses only indicated airspeed (IAS) and ignores rate of climb/descent (ROCD) entirely. There are several reasons for this:
+
+1. **NADP is defined by speed behavior.** The ICAO procedures specify when to accelerate and retract flaps — at 800 ft for NADP2, at 3000 ft for NADP1. The defining characteristic is the speed profile shape, not the climb rate. ROCD differences between NADP1 and NADP2 are a secondary consequence of the speed and configuration decisions.
+
+2. **IAS is a direct measurement; ROCD is derived and noisy.** Mode S EHS provides IAS as a directly downlinked parameter from the aircraft's air data computer. ROCD, however, is derived from barometric altitude differences over short time intervals, making it inherently noisy with oscillations of 500–1500 ft/min around the mean. This noise overwhelms the ~500 ft/min systematic difference between procedures.
+
+3. **ROCD varies strongly with aircraft type and weight.** A heavy B777 and a light E190 may both follow NADP2 but have very different climb rates due to thrust-to-weight ratio differences. IAS relative to V2 normalizes out most of this variation — both aircraft types show the same acceleration pattern relative to their respective V2 speeds.
+
+4. **Empirical validation.** Including ROCD in the classification distance metric caused noise to dominate the signal, producing unreliable results (e.g., inverting the expected NADP1/NADP2 ratio). Removing ROCD and classifying on IAS alone yielded results consistent with literature and Schiphol's known ~80% NADP2 adoption rate.
+
+ROCD profiles are still computed and included in visualizations for comparison, as they reveal interesting aerodynamic signatures — notably the characteristic ROCD dip at 1000–1500 ft in NADP2 flights where the aircraft trades climb rate for speed during flap retraction.
+
 ### Classification
 
 For each flight, we extract speed features at three NADP-critical altitudes:
