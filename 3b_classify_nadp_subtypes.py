@@ -2,8 +2,10 @@
 Classify flights into NADP1/NADP2 by matching against ICAO reference profiles,
 and compute delta scores measuring deviation from the matched standard.
 
-This is the 2-profile classifier (NADP1 vs NADP2).
-For NADP2 sub-type classification (800/1000/1500), see 3b_classify_nadp_subtypes.py.
+- Defines ICAO reference profiles as piecewise-linear functions of altitude.
+- Classifies each flight by Euclidean distance to reference milestone features.
+- Computes per-flight delta scores as RMS residual from matched reference curve.
+- Generates visualizations.
 """
 
 import os
@@ -13,12 +15,19 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-PLOT_DIR = "plots/2profiles"
+PLOT_DIR = "plots/4profiles"
 os.makedirs(PLOT_DIR, exist_ok=True)
 sns.set_theme(style="whitegrid", font_scale=1.2)
 PALETTE = {"nadp1": "#4C72B0", "nadp2": "#DD5145", "unknown": "#999999"}
+SUBTYPE_PALETTE = {"nadp2-800": "#DD5145", "nadp2-1000": "#FF7F0E", "nadp2-1500": "#8C564B"}
+SUBTYPE_LABELS = {"nadp2-800": "NADP2-800", "nadp2-1000": "NADP2-1000", "nadp2-1500": "NADP2-1500"}
 
 # --- ICAO Reference Speed Profiles ---
+# Piecewise-linear reference curves: delta_ias (IAS - V2) as function of altitude.
+# V2 baseline is min IAS in 200-800ft band, so delta ≈ 0 in initial climb.
+
+# Reference altitudes for curves (every 100ft from 200 to 3500)
+# Capped at 3500ft to avoid QNH->QNE transition zone above ~4000ft
 ALT_GRID = np.arange(200, 3600, 100)
 
 
@@ -27,31 +36,47 @@ def _interp_profile(alt_breakpoints, values, alt_grid):
     return np.interp(alt_grid, alt_breakpoints, values)
 
 
+# All reference curves: NADP1 + three NADP2 sub-types
 # NADP1: constant speed (~V2) until 3000ft, then accelerate
-# NADP2: linear ramp from 800ft to 70 kt above V2 at 3000ft
+# NADP2 variants: linear ramp from acceleration altitude to 70 kt at 3000ft
 REF_CURVES = {
     "nadp1": _interp_profile([0, 800, 3000, 3500], [0, 0, 0, 25], ALT_GRID),
-    "nadp2": _interp_profile([0, 800, 3000, 3500], [0, 0, 70, 75], ALT_GRID),
+    "nadp2-800": _interp_profile([0, 800, 3000, 3500], [0, 0, 70, 75], ALT_GRID),
+    "nadp2-1000": _interp_profile([0, 1000, 3000, 3500], [0, 0, 70, 75], ALT_GRID),
+    "nadp2-1500": _interp_profile([0, 1500, 3000, 3500], [0, 0, 70, 75], ALT_GRID),
 }
 
-THRESHOLD = 0.6
+# Separation ratio thresholds (closest / second-closest RMS).
+# Stricter for NADP1 (tight cluster), more relaxed for NADP2 variants.
+NADP1_THRESHOLD = 0.4
+NADP2_THRESHOLD = 0.9
 
 
 def classify_flight(row):
-    """Classify a flight by full-curve RMS distance to NADP1 and NADP2 references."""
+    """Classify a flight by full-curve RMS distance to all reference profiles.
+
+    Computes RMS distance to each of the 4 references (NADP1, NADP2-800,
+    NADP2-1000, NADP2-1500). First decides NADP1 vs NADP2 using separation
+    ratio between NADP1 distance and best NADP2 distance. Then picks the
+    closest NADP2 sub-type.
+    """
     delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
     flight_ias = row[delta_ias_cols].values.astype(float)
     mask = ~np.isnan(flight_ias)
     if mask.sum() < 5:
         return "unknown", np.nan, np.nan
 
+    # Compute RMS distance to each reference
     distances = {}
     for label, ref_curve in REF_CURVES.items():
         residuals = flight_ias[mask] - ref_curve[mask]
         distances[label] = np.sqrt(np.mean(residuals ** 2))
 
     dist_nadp1 = distances["nadp1"]
-    dist_nadp2 = distances["nadp2"]
+    # Best NADP2 sub-type
+    nadp2_dists = {k: v for k, v in distances.items() if k.startswith("nadp2")}
+    best_nadp2_label = min(nadp2_dists, key=nadp2_dists.get)
+    dist_nadp2 = nadp2_dists[best_nadp2_label]
 
     closer = min(dist_nadp1, dist_nadp2)
     farther = max(dist_nadp1, dist_nadp2)
@@ -61,12 +86,14 @@ def classify_flight(row):
 
     ratio = closer / farther
 
-    if ratio > THRESHOLD:
-        return "unknown", dist_nadp1, dist_nadp2
     if dist_nadp1 < dist_nadp2:
+        if ratio > NADP1_THRESHOLD:
+            return "unknown", dist_nadp1, dist_nadp2
         return "nadp1", dist_nadp1, dist_nadp2
     else:
-        return "nadp2", dist_nadp1, dist_nadp2
+        if ratio > NADP2_THRESHOLD:
+            return "unknown", dist_nadp1, dist_nadp2
+        return best_nadp2_label, dist_nadp1, dist_nadp2
 
 
 # --- Main ---
@@ -74,19 +101,24 @@ def classify_flight(row):
 df = pd.read_parquet("data/nadp_features.parquet")
 print(f"Loaded features for {len(df)} flights")
 
-# Classify each flight
+# Classify each flight (single stage: all 4 types at once)
 classifications = df.apply(classify_flight, axis=1)
 df["nadp_type"] = classifications.apply(lambda x: x[0])
 df["dist_nadp1"] = classifications.apply(lambda x: x[1])
 df["dist_nadp2"] = classifications.apply(lambda x: x[2])
 
+# Derive high-level type (nadp1 vs nadp2) and separation ratio
+df["nadp_category"] = df["nadp_type"].apply(
+    lambda x: "nadp1" if x == "nadp1" else ("nadp2" if x.startswith("nadp2") else "unknown")
+)
 df["separation_ratio"] = df[["dist_nadp1", "dist_nadp2"]].min(axis=1) / df[["dist_nadp1", "dist_nadp2"]].max(axis=1)
 
 # Compute delta score: RMS to the matched reference curve
 def _compute_delta(row):
     ref_key = row["nadp_type"]
     if ref_key == "unknown":
-        ref_key = "nadp1" if row["dist_nadp1"] < row["dist_nadp2"] else "nadp2"
+        # Use closest family
+        ref_key = "nadp1" if row["dist_nadp1"] < row["dist_nadp2"] else "nadp2-1000"
     ref_curve = REF_CURVES[ref_key]
     delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
     flight_ias = row[delta_ias_cols].values.astype(float)
@@ -101,16 +133,21 @@ deltas = df.apply(_compute_delta, axis=1)
 df["delta_score"] = deltas.apply(lambda x: x[0])
 df["delta_ias_rms"] = deltas.apply(lambda x: x[1])
 
-nadp1 = df[df["nadp_type"] == "nadp1"]
-nadp2 = df[df["nadp_type"] == "nadp2"]
-unknown = df[df["nadp_type"] == "unknown"]
+nadp1 = df[df["nadp_category"] == "nadp1"]
+nadp2 = df[df["nadp_category"] == "nadp2"]
+unknown = df[df["nadp_category"] == "unknown"]
 
-print(f"\nClassification results (threshold = {THRESHOLD}):")
+print(f"\nClassification results (NADP1 threshold = {NADP1_THRESHOLD}, NADP2 threshold = {NADP2_THRESHOLD}):")
 print(f"  NADP1:       {len(nadp1)} flights ({len(nadp1)/len(df)*100:.1f}%)")
 print(f"  NADP2:       {len(nadp2)} flights ({len(nadp2)/len(df)*100:.1f}%)")
 print(f"  Unknown:     {len(unknown)} flights ({len(unknown)/len(df)*100:.1f}%)")
 
-print(f"\nAmong classified: {len(nadp2)/(len(nadp1)+len(nadp2))*100:.1f}% NADP2")
+# NADP2 sub-type breakdown
+print(f"\nNADP2 sub-type breakdown:")
+for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
+    sub = df[df["nadp_type"] == st]
+    if len(nadp2) > 0:
+        print(f"  {st}: {len(sub)} flights ({len(sub)/len(nadp2)*100:.1f}% of NADP2, mean RMS = {sub['delta_ias_rms'].mean():.1f} kt)")
 
 print(f"\nDelta score (IAS RMS / 30) statistics:")
 if len(nadp1) > 0:
@@ -120,13 +157,13 @@ if len(nadp2) > 0:
 if len(unknown) > 0:
     print(f"  Unknown mean delta: {unknown['delta_score'].mean():.3f}")
 print(f"\nSeparation ratio (closest/second-closest, lower = more distinct):")
-classified = df[df.nadp_type != "unknown"]
+classified = df[df.nadp_category != "unknown"]
 print(f"  Classified mean: {classified['separation_ratio'].mean():.3f}")
 print(f"  Unknown mean:    {unknown['separation_ratio'].mean():.3f}")
 
 # Export results
 result_cols = [
-    "flight_id", "icao_actype", "v2", "nadp_type",
+    "flight_id", "icao_actype", "v2", "nadp_type", "nadp_category",
     "delta_score", "delta_ias_rms",
     "delta_ias_800", "delta_ias_1500", "delta_ias_3000",
     "mean_rocd_800_1500", "mean_rocd_1500_3000",
@@ -154,8 +191,7 @@ def _plot_trajectories(ax, flight_ids_df, df_raw, color, max_n=200):
         t0 = airborne["actual_time"].iloc[0]
         fdata = fdata[fdata["actual_time"] >= t0]
         ts = (fdata["actual_time"] - t0).dt.total_seconds()
-        keep = ts <= 300
-        ax.plot(ts[keep], fdata["ALT"][keep], lw=0.5, color=color, alpha=0.2)
+        ax.plot(ts, fdata["ALT"], lw=0.5, color=color, alpha=0.2)
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), sharey=True, sharex=True)
 
@@ -176,10 +212,11 @@ print(f"Saved {PLOT_DIR}/01_trajectories_by_nadp.png")
 
 
 # Plot 2: IAS and ROCD vs altitude (2x2: top=IAS, bottom=ROCD)
+# Use high-contrast colors for NADP2 traces so sub-types are distinguishable at low alpha
+TRACE_COLORS = {"nadp2-800": "#E41A1C", "nadp2-1000": "#4DAF4A", "nadp2-1500": "#7B68EE"}
 fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharey=True)
 
 nadp1_sample = nadp1.sample(min(200, len(nadp1)), random_state=42)
-nadp2_sample = nadp2.sample(min(200, len(nadp2)), random_state=42)
 
 for _, row in nadp1_sample.iterrows():
     ias_vals = [row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
@@ -187,11 +224,14 @@ for _, row in nadp1_sample.iterrows():
     rocd_vals = [row.get(f"rocd_alt_{a}", np.nan) for a in ALT_GRID]
     axes[1, 0].plot(rocd_vals, ALT_GRID, lw=0.5, color=PALETTE["nadp1"], alpha=0.15)
 
-for _, row in nadp2_sample.iterrows():
-    ias_vals = [row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
-    axes[0, 1].plot(ias_vals, ALT_GRID, lw=0.5, color=PALETTE["nadp2"], alpha=0.15)
-    rocd_vals = [row.get(f"rocd_alt_{a}", np.nan) for a in ALT_GRID]
-    axes[1, 1].plot(rocd_vals, ALT_GRID, lw=0.5, color=PALETTE["nadp2"], alpha=0.15)
+for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
+    st_df = df[df["nadp_type"] == st]
+    st_sample = st_df.sample(min(70, len(st_df)), random_state=42)
+    for _, row in st_sample.iterrows():
+        ias_vals = [row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
+        axes[0, 1].plot(ias_vals, ALT_GRID, lw=0.5, color=TRACE_COLORS[st], alpha=0.15)
+        rocd_vals = [row.get(f"rocd_alt_{a}", np.nan) for a in ALT_GRID]
+        axes[1, 1].plot(rocd_vals, ALT_GRID, lw=0.5, color=TRACE_COLORS[st], alpha=0.15)
 
 axes[0, 0].plot(REF_CURVES["nadp1"], ALT_GRID, "k-", lw=2.5, label="NADP1 reference")
 axes[0, 0].set_title("NADP1: IAS - V2")
@@ -200,10 +240,12 @@ axes[0, 0].set_ylabel("Altitude (ft)")
 axes[0, 0].legend()
 axes[0, 0].set_xlim(-20, 120)
 
-axes[0, 1].plot(REF_CURVES["nadp2"], ALT_GRID, "k-", lw=2.5, label="NADP2 reference")
+for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
+    axes[0, 1].plot(REF_CURVES[st], ALT_GRID, lw=2, ls="--",
+                     color=TRACE_COLORS[st], label=SUBTYPE_LABELS[st])
 axes[0, 1].set_title("NADP2: IAS - V2")
 axes[0, 1].set_xlabel("IAS - V2 (kt)")
-axes[0, 1].legend()
+axes[0, 1].legend(fontsize=9)
 axes[0, 1].set_xlim(-20, 120)
 
 axes[1, 0].set_title("NADP1: ROCD")
@@ -220,29 +262,32 @@ print(f"Saved {PLOT_DIR}/02_speed_profiles_vs_reference.png")
 
 
 # Plot 3: Separation ratio distribution (separate subplots per type)
-TYPE_ORDER = ["nadp1", "nadp2", "unknown"]
-fig, axes = plt.subplots(len(TYPE_ORDER), 1, figsize=(10, 7), sharex=True, sharey=True)
+TYPE_ORDER = ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500", "unknown"]
+TYPE_COLORS = {**{"nadp1": PALETTE["nadp1"], "unknown": PALETTE["unknown"]}, **SUBTYPE_PALETTE}
+fig, axes = plt.subplots(len(TYPE_ORDER), 1, figsize=(10, 10), sharex=True, sharey=True)
 for ax, label in zip(axes, TYPE_ORDER):
     subset = df[df["nadp_type"] == label]["separation_ratio"].dropna()
-    sns.histplot(subset, bins=50, color=PALETTE[label], ax=ax)
-    ax.axvline(THRESHOLD, color="k", ls="--", lw=1.5, label=f"threshold={THRESHOLD}")
-    ax.set_ylabel(f"{label.upper()}\ncount")
+    sns.histplot(subset, bins=50, color=TYPE_COLORS[label], ax=ax)
+    ax.axvline(NADP1_THRESHOLD, color=PALETTE["nadp1"], ls="--", lw=1.5)
+    ax.axvline(NADP2_THRESHOLD, color=PALETTE["nadp2"], ls="--", lw=1.5)
+    display = SUBTYPE_LABELS.get(label, label.upper())
+    ax.set_ylabel(f"{display}\ncount")
     ax.set_xlabel("")
 axes[0].set_title("Separation ratio distribution by NADP type")
-axes[0].legend()
 axes[-1].set_xlabel("Separation ratio (0 = perfect match, 1 = equidistant)")
 plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/03_separation_ratio.png", dpi=150)
 print(f"Saved {PLOT_DIR}/03_separation_ratio.png")
 
 
-# Plot 3b: Threshold sensitivity
-thresholds = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+# Plot 3b: Varying asymmetric separation thresholds (re-classify from stored RMS)
+threshold_pairs = [(0.3, 0.7), (0.3, 0.9), (0.4, 0.7), (0.4, 0.9), (0.5, 0.8), (0.5, 0.9)]
 fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharey=True)
 
+# Pre-compute per-flight: best label, best RMS, second RMS (reuse classify logic)
 _delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
 
-def _classify_with_threshold(row, thresh):
+def _classify_with_thresholds(row, t1, t2):
     flight_ias = row[_delta_ias_cols].values.astype(float)
     mask = ~np.isnan(flight_ias)
     if mask.sum() < 5:
@@ -251,25 +296,32 @@ def _classify_with_threshold(row, thresh):
     for label, ref_curve in REF_CURVES.items():
         residuals = flight_ias[mask] - ref_curve[mask]
         distances[label] = np.sqrt(np.mean(residuals ** 2))
-    d1, d2 = distances["nadp1"], distances["nadp2"]
+    d1 = distances["nadp1"]
+    nadp2_dists = {k: v for k, v in distances.items() if k.startswith("nadp2")}
+    best_n2_label = min(nadp2_dists, key=nadp2_dists.get)
+    d2 = nadp2_dists[best_n2_label]
     closer, farther = min(d1, d2), max(d1, d2)
     if farther == 0:
         return "unknown"
-    if closer / farther > thresh:
-        return "unknown"
-    return "nadp1" if d1 < d2 else "nadp2"
+    ratio = closer / farther
+    if d1 < d2:
+        return "unknown" if ratio > t1 else "nadp1"
+    else:
+        return "unknown" if ratio > t2 else best_n2_label
 
-_bar_labels = ["NADP1", "NADP2", "Unknown"]
-_bar_keys = ["nadp1", "nadp2", "unknown"]
-_bar_colors = [PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]]
+_bar_labels = ["NADP1", "NADP2-800", "NADP2-1000", "NADP2-1500", "Unknown"]
+_bar_keys = ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500", "unknown"]
+_bar_colors = [PALETTE["nadp1"], SUBTYPE_PALETTE["nadp2-800"], SUBTYPE_PALETTE["nadp2-1000"],
+               SUBTYPE_PALETTE["nadp2-1500"], PALETTE["unknown"]]
 
-for ax, thresh in zip(axes.flat, thresholds):
-    cats = df.apply(lambda row, t=thresh: _classify_with_threshold(row, t), axis=1)
+for ax, (t1, t2) in zip(axes.flat, threshold_pairs):
+    cats = df.apply(lambda row: _classify_with_thresholds(row, t1, t2), axis=1)
     counts = [int((cats == k).sum()) for k in _bar_keys]
     total = sum(counts)
     bars = ax.barh(_bar_labels, counts, color=_bar_colors)
-    title = f"threshold={thresh}"
-    if thresh == THRESHOLD:
+    is_current = (t1 == NADP1_THRESHOLD and t2 == NADP2_THRESHOLD)
+    title = f"NADP1={t1}, NADP2={t2}"
+    if is_current:
         title += " (current)"
     ax.set_title(title)
     ax.set_xlim(0, len(df) * 1.15)
@@ -279,7 +331,7 @@ for ax, thresh in zip(axes.flat, thresholds):
 
 for ax in axes[:, 0]:
     ax.set_ylabel("Category")
-plt.suptitle("Classification results at varying thresholds")
+plt.suptitle("Classification results at varying asymmetric thresholds")
 plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/03b_threshold_sensitivity.png", dpi=150)
 print(f"Saved {PLOT_DIR}/03b_threshold_sensitivity.png")
@@ -293,10 +345,14 @@ for col_idx, (cat_label, cat_df) in enumerate([("NADP1", nadp1), ("NADP2", nadp2
     best = valid.head(3)
     worst = valid.tail(3)
 
-    # Top row: IAS
+    # Top row: IAS — plot matched reference for each flight
     ax = axes[0, col_idx]
-    ref_key = "nadp1" if col_idx == 0 else "nadp2"
-    ax.plot(REF_CURVES[ref_key], ALT_GRID, "k--", lw=1.5, alpha=0.5)
+    refs_plotted = set()
+    for _, row in pd.concat([best, worst]).iterrows():
+        ref = REF_CURVES.get(row["nadp_type"], REF_CURVES["nadp2-800"])
+        if row["nadp_type"] not in refs_plotted:
+            ax.plot(ref, ALT_GRID, "k--", lw=1.5, alpha=0.5)
+            refs_plotted.add(row["nadp_type"])
     for _, row in best.iterrows():
         vals = [row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
         ax.plot(vals, ALT_GRID, "g-", lw=1, alpha=0.7)
@@ -331,17 +387,24 @@ print(f"Saved {PLOT_DIR}/04_reference_comparison.png")
 
 # Plot 5: Classification feature space (delta_ias_1500 vs delta_ias_3000)
 fig, ax = plt.subplots(figsize=(10, 8))
-for label in ["unknown", "nadp1", "nadp2"]:
+for label in ["unknown", "nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500"]:
     subset = df[df["nadp_type"] == label]
+    color = TYPE_COLORS[label]
+    display = SUBTYPE_LABELS.get(label, label.upper())
     ax.scatter(
         subset["delta_ias_1500"], subset["delta_ias_3000"],
-        c=PALETTE[label], label=label.upper(), s=8, alpha=0.3,
+        c=color, label=display, s=8, alpha=0.3,
     )
-# Mark reference points
+# Mark reference points (interpolate at 1500 and 3000 from each curve)
 i_1500 = np.searchsorted(ALT_GRID, 1500)
 i_3000 = np.searchsorted(ALT_GRID, 3000)
-for name, key in [("NADP1", "nadp1"), ("NADP2", "nadp2")]:
-    curve = REF_CURVES[key]
+ref_markers = {
+    "NADP1": REF_CURVES["nadp1"],
+    "NADP2-800": REF_CURVES["nadp2-800"],
+    "NADP2-1000": REF_CURVES["nadp2-1000"],
+    "NADP2-1500": REF_CURVES["nadp2-1500"],
+}
+for name, curve in ref_markers.items():
     ax.scatter(curve[i_1500], curve[i_3000], marker="*", s=300, c="k",
                zorder=10, edgecolors="white", linewidths=1)
     ax.annotate(name, (curve[i_1500], curve[i_3000]), fontsize=9, fontweight="bold",
@@ -359,19 +422,27 @@ print(f"Saved {PLOT_DIR}/05_feature_space.png")
 top_types = df["icao_actype"].value_counts().head(15).index
 df_top = df[df["icao_actype"].isin(top_types)].copy()
 
+_type_cols = ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500", "unknown"]
+_type_display = ["NADP1", "NADP2-800", "NADP2-1000", "NADP2-1500", "Unknown"]
+_type_colors = [PALETTE["nadp1"], SUBTYPE_PALETTE["nadp2-800"], SUBTYPE_PALETTE["nadp2-1000"],
+                SUBTYPE_PALETTE["nadp2-1500"], PALETTE["unknown"]]
+
 ct = pd.crosstab(df_top["icao_actype"], df_top["nadp_type"], normalize="index")
-ct = ct.reindex(columns=["nadp1", "nadp2", "unknown"], fill_value=0)
-ct = ct.loc[ct["nadp2"].sort_values(ascending=False).index]
+ct = ct.reindex(columns=_type_cols, fill_value=0)
+# Sort by total NADP2 proportion
+ct["_nadp2_total"] = ct["nadp2-800"] + ct["nadp2-1000"] + ct["nadp2-1500"]
+ct = ct.loc[ct["_nadp2_total"].sort_values(ascending=False).index]
+ct = ct.drop(columns="_nadp2_total")
 
 fig, ax = plt.subplots(figsize=(12, 7))
-ct.plot.barh(stacked=True, color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]], ax=ax)
+ct.plot.barh(stacked=True, color=_type_colors, ax=ax)
 ax.set_xlabel("Proportion of flights")
 ax.set_ylabel("Aircraft type")
 ax.set_title("NADP classification by aircraft type (top 15)")
 ax.legend(
-    ["NADP1", "NADP2", "Unknown"],
+    _type_display,
     loc="upper center", bbox_to_anchor=(0.5, -0.08),
-    ncol=3, frameon=False,
+    ncol=5, frameon=False,
 )
 counts_by_type = df_top["icao_actype"].value_counts()
 for i, actype in enumerate(ct.index):
@@ -386,7 +457,7 @@ print(f"Saved {PLOT_DIR}/06_actype_breakdown.png")
 fig, (ax_ias, ax_rocd) = plt.subplots(1, 2, figsize=(16, 8), sharey=True)
 
 for label in ["nadp1", "nadp2"]:
-    subset = df[df["nadp_type"] == label]
+    subset = df[df["nadp_category"] == label]
     ias_curves = np.array([[row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
                             for _, row in subset.iterrows()])
     rocd_curves = np.array([[row.get(f"rocd_alt_{a}", np.nan) for a in ALT_GRID]
@@ -420,3 +491,49 @@ plt.suptitle("Mean profiles with IQR by NADP type")
 plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/07_mean_profiles.png", dpi=150)
 print(f"Saved {PLOT_DIR}/07_mean_profiles.png")
+
+
+# Plot 8: NADP2 sub-type profiles (mean + IQR per sub-type, with reference curves)
+fig, (ax_prof, ax_bar) = plt.subplots(1, 2, figsize=(16, 8),
+                                       gridspec_kw={"width_ratios": [2, 1]})
+
+for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
+    subset = df[df["nadp_type"] == st]
+    ias_curves = np.array([[row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
+                            for _, row in subset.iterrows()])
+    mean_ias = np.nanmean(ias_curves, axis=0)
+    ax_prof.plot(mean_ias, ALT_GRID, color=SUBTYPE_PALETTE[st], lw=2,
+                 label=f"{SUBTYPE_LABELS[st]} mean (n={len(subset)})")
+    ax_prof.fill_betweenx(ALT_GRID,
+                           np.nanpercentile(ias_curves, 25, axis=0),
+                           np.nanpercentile(ias_curves, 75, axis=0),
+                           color=SUBTYPE_PALETTE[st], alpha=0.15)
+    # Reference curve
+    ax_prof.plot(REF_CURVES[st], ALT_GRID, color=SUBTYPE_PALETTE[st],
+                 lw=2, ls="--")
+
+ax_prof.set_xlabel("IAS - V2 (kt)")
+ax_prof.set_ylabel("Altitude (ft)")
+ax_prof.set_title("Mean speed profiles by NADP2 sub-type")
+ax_prof.legend(loc="lower right")
+ax_prof.set_xlim(-10, 100)
+
+# Bar chart: sub-type counts
+counts = [len(df[df["nadp_type"] == st]) for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]]
+n_nadp2 = sum(counts)
+bars = ax_bar.barh(
+    [SUBTYPE_LABELS[st] for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]],
+    counts,
+    color=[SUBTYPE_PALETTE[st] for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]],
+)
+for bar, count in zip(bars, counts):
+    ax_bar.text(count + n_nadp2 * 0.01, bar.get_y() + bar.get_height() / 2,
+                f"{count} ({count/n_nadp2*100:.0f}%)", va="center", fontsize=11)
+ax_bar.set_xlabel("Number of flights")
+ax_bar.set_title("NADP2 sub-type distribution")
+ax_bar.set_xlim(0, max(counts) * 1.25)
+
+plt.suptitle("NADP2 sub-type analysis (acceleration altitude variants)")
+plt.tight_layout()
+plt.savefig(f"{PLOT_DIR}/08_nadp2_subtypes.png", dpi=150)
+print(f"Saved {PLOT_DIR}/08_nadp2_subtypes.png")
