@@ -493,30 +493,86 @@ plt.savefig(f"{PLOT_DIR}/07_mean_profiles.png", dpi=150)
 print(f"Saved {PLOT_DIR}/07_mean_profiles.png")
 
 
-# Plot 8: NADP2 sub-type profiles (mean + IQR per sub-type, with reference curves)
-fig, (ax_prof, ax_bar) = plt.subplots(1, 2, figsize=(16, 8),
-                                       gridspec_kw={"width_ratios": [2, 1]})
+# Plot 8: NADP2 sub-type speed vs distance from takeoff
 
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Haversine distance in km between two points."""
+    R = 6371.0
+    dlat = np.radians(lat2 - lat1)
+    dlon = np.radians(lon2 - lon1)
+    a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
+    return R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+# Build distance-indexed IAS profiles per NADP2 flight (vectorized)
+DIST_GRID = np.arange(0, 21, 0.5)  # 0 to 20 km in 0.5 km steps
+dist_alt_profiles = {st: [] for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]}
+
+nadp2_flights = df[df["nadp_category"] == "nadp2"].dropna(subset=["v2"])
+sample = nadp2_flights.sample(min(3000, len(nadp2_flights)), random_state=42)
+sample_ids = set(sample["flight_id"])
+type_lookup = sample.set_index("flight_id")["nadp_type"].to_dict()
+v2_lookup = sample.set_index("flight_id")["v2"].to_dict()
+
+raw_sub = df_raw[df_raw["FLIGHT_ID"].isin(sample_ids)].sort_values(["FLIGHT_ID", "actual_time"])
+
+for fid, grp in raw_sub.groupby("FLIGHT_ID"):
+    if len(grp) < 5:
+        continue
+    airborne = grp[grp["ALT"] >= 50]
+    if airborne.empty:
+        continue
+    lat0, lon0 = airborne.iloc[0]["lat"], airborne.iloc[0]["lon"]
+    lats, lons = grp["lat"].values, grp["lon"].values
+    dists = _haversine_km(lat0, lon0, lats, lons)
+    alts = grp["ALT"].values
+    valid = ~np.isnan(alts) & ~np.isnan(dists)
+    if valid.sum() < 5:
+        continue
+    interp_alt = np.interp(DIST_GRID, dists[valid], alts[valid],
+                           left=np.nan, right=np.nan)
+    dist_alt_profiles[type_lookup[fid]].append(interp_alt)
+
+fig, (ax_ias, ax_dist, ax_bar) = plt.subplots(1, 3, figsize=(20, 8),
+                                               gridspec_kw={"width_ratios": [2, 2, 1]})
+
+# Left: IAS-V2 vs altitude (original)
 for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
     subset = df[df["nadp_type"] == st]
     ias_curves = np.array([[row.get(f"delta_ias_alt_{a}", np.nan) for a in ALT_GRID]
                             for _, row in subset.iterrows()])
     mean_ias = np.nanmean(ias_curves, axis=0)
-    ax_prof.plot(mean_ias, ALT_GRID, color=SUBTYPE_PALETTE[st], lw=2,
-                 label=f"{SUBTYPE_LABELS[st]} mean (n={len(subset)})")
-    ax_prof.fill_betweenx(ALT_GRID,
-                           np.nanpercentile(ias_curves, 25, axis=0),
-                           np.nanpercentile(ias_curves, 75, axis=0),
-                           color=SUBTYPE_PALETTE[st], alpha=0.15)
-    # Reference curve
-    ax_prof.plot(REF_CURVES[st], ALT_GRID, color=SUBTYPE_PALETTE[st],
-                 lw=2, ls="--")
+    ax_ias.plot(mean_ias, ALT_GRID, color=SUBTYPE_PALETTE[st], lw=2,
+                label=f"{SUBTYPE_LABELS[st]} mean (n={len(subset)})")
+    ax_ias.fill_betweenx(ALT_GRID,
+                          np.nanpercentile(ias_curves, 25, axis=0),
+                          np.nanpercentile(ias_curves, 75, axis=0),
+                          color=SUBTYPE_PALETTE[st], alpha=0.15)
+    ax_ias.plot(REF_CURVES[st], ALT_GRID, color=SUBTYPE_PALETTE[st], lw=2, ls="--")
 
-ax_prof.set_xlabel("IAS - V2 (kt)")
-ax_prof.set_ylabel("Altitude (ft)")
-ax_prof.set_title("Mean speed profiles by NADP2 sub-type")
-ax_prof.legend(loc="lower right")
-ax_prof.set_xlim(-10, 100)
+ax_ias.set_xlabel("IAS - V2 (kt)")
+ax_ias.set_ylabel("Altitude (ft)")
+ax_ias.set_title("Speed profiles")
+ax_ias.legend(loc="lower right", fontsize=9)
+ax_ias.set_xlim(-10, 100)
+
+# Middle: distance vs altitude
+for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]:
+    curves = np.array(dist_alt_profiles[st])
+    if len(curves) == 0:
+        continue
+    mean_alt = np.nanmean(curves, axis=0)
+    ax_dist.plot(DIST_GRID, mean_alt, color=SUBTYPE_PALETTE[st], lw=2,
+                 label=f"{SUBTYPE_LABELS[st]}")
+    ax_dist.fill_between(DIST_GRID,
+                          np.nanpercentile(curves, 25, axis=0),
+                          np.nanpercentile(curves, 75, axis=0),
+                          color=SUBTYPE_PALETTE[st], alpha=0.15)
+
+ax_dist.set_xlabel("Distance from takeoff (km)")
+ax_dist.set_ylabel("Altitude (ft)")
+ax_dist.set_title("Altitude vs distance")
+ax_dist.legend(loc="upper left", fontsize=9)
+ax_dist.set_ylim(0, 5000)
 
 # Bar chart: sub-type counts
 counts = [len(df[df["nadp_type"] == st]) for st in ["nadp2-800", "nadp2-1000", "nadp2-1500"]]
