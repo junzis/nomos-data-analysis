@@ -495,13 +495,16 @@ print(f"Saved {PLOT_DIR}/07_mean_profiles.png")
 
 # Plot 8: NADP2 sub-type speed vs distance from takeoff
 
-def _haversine_km(lat1, lon1, lat2, lon2):
-    """Haversine distance in km between two points."""
+def _cumulative_dist_km(lats, lons):
+    """Cumulative along-track haversine distance in km."""
     R = 6371.0
-    dlat = np.radians(lat2 - lat1)
-    dlon = np.radians(lon2 - lon1)
-    a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
-    return R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    dists = np.zeros(len(lats))
+    for i in range(1, len(lats)):
+        dlat = np.radians(lats[i] - lats[i - 1])
+        dlon = np.radians(lons[i] - lons[i - 1])
+        a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lats[i - 1])) * np.cos(np.radians(lats[i])) * np.sin(dlon / 2) ** 2
+        dists[i] = dists[i - 1] + R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    return dists
 
 # Build distance-indexed IAS profiles per NADP2 flight (vectorized)
 DIST_GRID = np.arange(0, 21, 0.5)  # 0 to 20 km in 0.5 km steps
@@ -521,9 +524,11 @@ for fid, grp in raw_sub.groupby("FLIGHT_ID"):
     airborne = grp[grp["ALT"] >= 50]
     if airborne.empty:
         continue
-    lat0, lon0 = airborne.iloc[0]["lat"], airborne.iloc[0]["lon"]
     lats, lons = grp["lat"].values, grp["lon"].values
-    dists = _haversine_km(lat0, lon0, lats, lons)
+    dists = _cumulative_dist_km(lats, lons)
+    # Offset so distance=0 at first airborne point
+    airborne_idx = airborne.index[0] - grp.index[0]
+    dists = dists - dists[airborne_idx]
     alts = grp["ALT"].values
     valid = ~np.isnan(alts) & ~np.isnan(dists)
     if valid.sum() < 5:
