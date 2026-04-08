@@ -58,86 +58,73 @@ NADP1_THRESHOLD = 0.4
 NADP2_THRESHOLD = 0.9
 
 
-def classify_flight(row):
-    """Classify a flight by full-curve RMS distance to all reference profiles.
-
-    Computes RMS distance to each of the 4 references (NADP1, NADP2-800,
-    NADP2-1000, NADP2-1500). First decides NADP1 vs NADP2 using separation
-    ratio between NADP1 distance and best NADP2 distance. Then picks the
-    closest NADP2 sub-type.
-    """
-    delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
-    flight_ias = row[delta_ias_cols].values.astype(float)
-    mask = ~np.isnan(flight_ias)
-    if mask.sum() < 5:
-        return "unknown", np.nan, np.nan
-
-    # Compute RMS distance to each reference
-    distances = {}
-    for label, ref_curve in REF_CURVES.items():
-        residuals = flight_ias[mask] - ref_curve[mask]
-        distances[label] = np.sqrt(np.mean(residuals ** 2))
-
-    dist_nadp1 = distances["nadp1"]
-    # Best NADP2 sub-type
-    nadp2_dists = {k: v for k, v in distances.items() if k.startswith("nadp2")}
-    best_nadp2_label = min(nadp2_dists, key=nadp2_dists.get)
-    dist_nadp2 = nadp2_dists[best_nadp2_label]
-
-    closer = min(dist_nadp1, dist_nadp2)
-    farther = max(dist_nadp1, dist_nadp2)
-
-    if farther == 0:
-        return "unknown", closer, farther
-
-    ratio = closer / farther
-
-    if dist_nadp1 < dist_nadp2:
-        if ratio > NADP1_THRESHOLD:
-            return "unknown", dist_nadp1, dist_nadp2
-        return "nadp1", dist_nadp1, dist_nadp2
-    else:
-        if ratio > NADP2_THRESHOLD:
-            return "unknown", dist_nadp1, dist_nadp2
-        return best_nadp2_label, dist_nadp1, dist_nadp2
-
-
 # --- Main ---
 
 df = pd.read_parquet("data/nadp_features.parquet")
 print(f"Loaded features for {len(df)} flights")
 
-# Classify each flight (single stage: all 4 types at once)
-classifications = df.apply(classify_flight, axis=1)
-df["nadp_type"] = classifications.apply(lambda x: x[0])
-df["dist_nadp1"] = classifications.apply(lambda x: x[1])
-df["dist_nadp2"] = classifications.apply(lambda x: x[2])
+# Vectorized classification: extract all flight IAS curves as a matrix
+delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
+flight_matrix = df[delta_ias_cols].values.astype(float)  # (n_flights, n_alts)
+valid_counts = np.sum(~np.isnan(flight_matrix), axis=1)
 
-# Derive high-level type (nadp1 vs nadp2) and separation ratio
-df["nadp_category"] = df["nadp_type"].apply(
-    lambda x: "nadp1" if x == "nadp1" else ("nadp2" if x.startswith("nadp2") else "unknown")
+# Build reference matrix: (n_refs, n_alts)
+ref_labels = list(REF_CURVES.keys())  # ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500"]
+ref_matrix = np.array([REF_CURVES[k] for k in ref_labels])
+
+# Compute RMS distance to each reference (NaN-aware)
+n_flights = len(df)
+dist_all = np.full((n_flights, len(ref_labels)), np.nan)
+for j, ref_curve in enumerate(ref_matrix):
+    residuals = flight_matrix - ref_curve
+    dist_all[:, j] = np.sqrt(np.nanmean(residuals ** 2, axis=1))
+
+# dist_all columns: 0=nadp1, 1=nadp2-800, 2=nadp2-1000, 3=nadp2-1500
+dist_nadp1 = dist_all[:, 0]
+dist_nadp2_all = dist_all[:, 1:]  # (n_flights, 3)
+best_nadp2_idx = np.nanargmin(dist_nadp2_all, axis=1)  # 0, 1, or 2
+dist_nadp2 = dist_nadp2_all[np.arange(n_flights), best_nadp2_idx]
+
+# Separation ratio and classification
+closer = np.minimum(dist_nadp1, dist_nadp2)
+farther = np.maximum(dist_nadp1, dist_nadp2)
+ratio = np.where(farther > 0, closer / farther, 1.0)
+
+nadp2_subtype_labels = np.array(["nadp2-800", "nadp2-1000", "nadp2-1500"])
+best_nadp2_label = nadp2_subtype_labels[best_nadp2_idx]
+
+# Apply asymmetric thresholds
+is_nadp1 = (dist_nadp1 < dist_nadp2) & (ratio < NADP1_THRESHOLD)
+is_nadp2 = (dist_nadp2 <= dist_nadp1) & (ratio < NADP2_THRESHOLD)
+insufficient = valid_counts < 5
+
+nadp_type = np.where(insufficient, "unknown",
+            np.where(is_nadp1, "nadp1",
+            np.where(is_nadp2, best_nadp2_label, "unknown")))
+
+df["nadp_type"] = nadp_type
+df["dist_nadp1"] = dist_nadp1
+df["dist_nadp2"] = dist_nadp2
+
+# Derive high-level category and separation ratio
+df["nadp_category"] = np.where(nadp_type == "nadp1", "nadp1",
+                      np.where(np.char.startswith(nadp_type, "nadp2"), "nadp2", "unknown"))
+df["separation_ratio"] = ratio
+
+# Vectorized delta score: RMS to matched reference
+# Map each flight to its matched reference index in ref_matrix
+type_to_idx = {"nadp1": 0, "nadp2-800": 1, "nadp2-1000": 2, "nadp2-1500": 3}
+matched_idx = np.array([type_to_idx.get(t, -1) for t in nadp_type])
+# For unknown flights, use closest family
+unknown_mask = matched_idx == -1
+matched_idx[unknown_mask] = np.where(
+    dist_nadp1[unknown_mask] < dist_nadp2[unknown_mask], 0, 2  # nadp1 or nadp2-1000
 )
-df["separation_ratio"] = df[["dist_nadp1", "dist_nadp2"]].min(axis=1) / df[["dist_nadp1", "dist_nadp2"]].max(axis=1)
-
-# Compute delta score: RMS to the matched reference curve
-def _compute_delta(row):
-    ref_key = row["nadp_type"]
-    if ref_key == "unknown":
-        # Use closest family
-        ref_key = "nadp1" if row["dist_nadp1"] < row["dist_nadp2"] else "nadp2-1000"
-    ref_curve = REF_CURVES[ref_key]
-    delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
-    flight_ias = row[delta_ias_cols].values.astype(float)
-    mask = ~np.isnan(flight_ias)
-    if mask.sum() < 5:
-        return np.nan, np.nan
-    residuals = flight_ias[mask] - ref_curve[mask]
-    rms = np.sqrt(np.mean(residuals ** 2))
-    return rms / 30, rms
-
-deltas = df.apply(_compute_delta, axis=1)
-df["delta_score"] = deltas.apply(lambda x: x[0])
-df["delta_ias_rms"] = deltas.apply(lambda x: x[1])
+matched_curve = ref_matrix[matched_idx]  # (n_flights, n_alts)
+residuals = flight_matrix - matched_curve
+delta_ias_rms = np.sqrt(np.nanmean(residuals ** 2, axis=1))
+df["delta_score"] = delta_ias_rms / 30
+df["delta_ias_rms"] = delta_ias_rms
 
 nadp1 = df[df["nadp_category"] == "nadp1"]
 nadp2 = df[df["nadp_category"] == "nadp2"]
@@ -290,30 +277,12 @@ print(f"Saved {PLOT_DIR}/03_separation_ratio.png")
 threshold_pairs = [(0.3, 0.7), (0.3, 0.9), (0.4, 0.7), (0.4, 0.9), (0.5, 0.8), (0.5, 0.9)]
 fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharey=True)
 
-# Pre-compute per-flight: best label, best RMS, second RMS (reuse classify logic)
-_delta_ias_cols = [f"delta_ias_alt_{a}" for a in ALT_GRID]
-
-def _classify_with_thresholds(row, t1, t2):
-    flight_ias = row[_delta_ias_cols].values.astype(float)
-    mask = ~np.isnan(flight_ias)
-    if mask.sum() < 5:
-        return "unknown"
-    distances = {}
-    for label, ref_curve in REF_CURVES.items():
-        residuals = flight_ias[mask] - ref_curve[mask]
-        distances[label] = np.sqrt(np.mean(residuals ** 2))
-    d1 = distances["nadp1"]
-    nadp2_dists = {k: v for k, v in distances.items() if k.startswith("nadp2")}
-    best_n2_label = min(nadp2_dists, key=nadp2_dists.get)
-    d2 = nadp2_dists[best_n2_label]
-    closer, farther = min(d1, d2), max(d1, d2)
-    if farther == 0:
-        return "unknown"
-    ratio = closer / farther
-    if d1 < d2:
-        return "unknown" if ratio > t1 else "nadp1"
-    else:
-        return "unknown" if ratio > t2 else best_n2_label
+# Reuse precomputed distances for vectorized threshold sweep
+_d1 = df["dist_nadp1"].values
+_d2 = df["dist_nadp2"].values
+_ratio = df["separation_ratio"].values
+_vc = valid_counts
+_best_n2 = best_nadp2_label  # precomputed array of best nadp2 sub-type labels
 
 _bar_labels = ["NADP1", "NADP2-800", "NADP2-1000", "NADP2-1500", "Unknown"]
 _bar_keys = ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500", "unknown"]
@@ -321,7 +290,11 @@ _bar_colors = [PALETTE["nadp1"], SUBTYPE_PALETTE["nadp2-800"], SUBTYPE_PALETTE["
                SUBTYPE_PALETTE["nadp2-1500"], PALETTE["unknown"]]
 
 for ax, (t1, t2) in zip(axes.flat, threshold_pairs):
-    cats = df.apply(lambda row: _classify_with_thresholds(row, t1, t2), axis=1)
+    is_n1 = (_d1 < _d2) & (_ratio < t1)
+    is_n2 = (_d2 <= _d1) & (_ratio < t2)
+    cats = np.where(_vc < 5, "unknown",
+           np.where(is_n1, "nadp1",
+           np.where(is_n2, _best_n2, "unknown")))
     counts = [int((cats == k).sum()) for k in _bar_keys]
     total = sum(counts)
     bars = ax.barh(_bar_labels, counts, color=_bar_colors)
@@ -393,17 +366,32 @@ print(f"Saved {PLOT_DIR}/04_reference_comparison.png")
 
 # Plot 5: Classification feature space (delta_ias_1500 vs delta_ias_3000)
 fig, ax = plt.subplots(figsize=(10, 8))
+_max_scatter = 5000
 for label in ["unknown", "nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500"]:
     subset = df[df["nadp_type"] == label]
+    if len(subset) > _max_scatter:
+        subset = subset.sample(_max_scatter, random_state=42)
     color = TYPE_COLORS[label]
     display = SUBTYPE_LABELS.get(label, label.upper())
     ax.scatter(
         subset["delta_ias_1500"], subset["delta_ias_3000"],
         c=color, label=display, s=8, alpha=0.3,
     )
-# Mark reference points (interpolate at 1500 and 3000 from each curve)
+# Mark reference points with staggered labels to avoid overlap
 i_1500 = np.searchsorted(ALT_GRID, 1500)
 i_3000 = np.searchsorted(ALT_GRID, 3000)
+_label_offsets = {
+    "NADP1": (8, -14),
+    "NADP2-800": (8, -18),
+    "NADP2-1000": (8, 10),
+    "NADP2-1500": (-10, 10),
+}
+_label_ha = {
+    "NADP1": "left",
+    "NADP2-800": "left",
+    "NADP2-1000": "left",
+    "NADP2-1500": "right",
+}
 ref_markers = {
     "NADP1": REF_CURVES["nadp1"],
     "NADP2-800": REF_CURVES["nadp2-800"],
@@ -414,7 +402,8 @@ for name, curve in ref_markers.items():
     ax.scatter(curve[i_1500], curve[i_3000], marker="*", s=300, c="k",
                zorder=10, edgecolors="white", linewidths=1)
     ax.annotate(name, (curve[i_1500], curve[i_3000]), fontsize=9, fontweight="bold",
-                xytext=(8, 8), textcoords="offset points")
+                xytext=_label_offsets[name], textcoords="offset points",
+                ha=_label_ha[name])
 ax.set_xlabel("IAS - V2 at 1500 ft (kt)")
 ax.set_ylabel("IAS - V2 at 3000 ft (kt)")
 ax.set_title("Classification feature space")
