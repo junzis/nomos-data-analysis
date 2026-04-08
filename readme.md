@@ -35,7 +35,7 @@ Input is VEMMIS enhanced surveillance CSV files, one per day. Each row is a surv
 | `EHS_ROCD` | Rate of climb/descent from Mode S EHS (ft/min) |
 | `actual_time` | Timestamp |
 
-Place data files in `data/vemmis_202503/` with naming pattern `vemmis_YYYYMMDD.csv`.
+Place data files in `data/vemmis_YYYYMM/` directories with naming pattern `vemmis_YYYYMMDD.csv`.
 
 ## Method
 
@@ -90,7 +90,7 @@ Zero means the flight perfectly follows the reference; higher values mean more d
 
 Scripts, run in order:
 
-- `1_ingest_vemmis.py` — reads daily VEMMIS CSV files from `data/vemmis_202503/`, filters to EHAM departures, and keeps climb segments below 5000 ft within 500 s of departure. Output: `data/vemmis_departures.parquet`.
+- `1_ingest_vemmis.py` — reads daily VEMMIS CSV files, filters to EHAM departures, and keeps climb segments below 5000 ft within 500 s of departure. Use `--all-months` to process all available months instead of March 2025 only. Output: `data/vemmis_departures.parquet`.
 - `2_extract_features.py` — extracts V2, milestone features, and altitude-indexed speed/ROCD curves per flight. Output: `data/nadp_features.parquet`.
 - `3_classify_nadp.py` — classifies flights as NADP1/NADP2, computes delta scores, and generates plots. Output: `data/nadp_results.csv` and `plots/2profiles/`.
 - `3b_classify_nadp_subtypes.py` — extended classifier that distinguishes three NADP2 sub-types (800/1000/1500 ft). Output: `data/nadp_results.csv` and `plots/4profiles/`. See [NADP2 Sub-types](#nadp2-sub-types).
@@ -100,6 +100,15 @@ uv run python 1_ingest_vemmis.py
 uv run python 2_extract_features.py
 uv run python 3_classify_nadp.py        # 2-profile (NADP1 vs NADP2)
 uv run python 3b_classify_nadp_subtypes.py  # 4-profile (with NADP2 sub-types)
+```
+
+To process all available months (March-August 2025):
+
+```bash
+uv run python 1_ingest_vemmis.py --all-months
+uv run python 2_extract_features.py
+uv run python 3_classify_nadp.py
+uv run python 3b_classify_nadp_subtypes.py
 ```
 
 ## Results

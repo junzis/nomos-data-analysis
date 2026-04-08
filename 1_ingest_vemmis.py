@@ -1,18 +1,31 @@
 """
 Ingest VEMMIS enhanced surveillance data for EHAM departures.
 
-- Reads daily VEMMIS CSV files (March 2025).
+- Reads daily VEMMIS CSV files.
 - Filters to EHAM departures only.
 - Extracts climb segments (ALT < 5000 ft).
 - Keeps relevant columns: flight tracking + EHS parameters.
 - Exports to parquet.
+
+Usage:
+    uv run python 1_ingest_vemmis.py              # March 2025 only
+    uv run python 1_ingest_vemmis.py --all-months  # all available months
 """
 
+import argparse
 import glob
 
 import pandas as pd
 
-files = sorted(glob.glob("data/vemmis_202503/vemmis_202503*.csv"))
+parser = argparse.ArgumentParser()
+parser.add_argument("--all-months", action="store_true",
+                    help="Process all available months instead of March 2025 only")
+args = parser.parse_args()
+
+if args.all_months:
+    files = sorted(glob.glob("data/vemmis_*/vemmis_*.csv"))
+else:
+    files = sorted(glob.glob("data/vemmis_202503/vemmis_202503*.csv"))
 print(f"Found {len(files)} VEMMIS files")
 
 # Read and concatenate all daily files

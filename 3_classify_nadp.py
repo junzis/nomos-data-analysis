@@ -6,12 +6,18 @@ This is the 2-profile classifier (NADP1 vs NADP2).
 For NADP2 sub-type classification (800/1000/1500), see 3b_classify_nadp_subtypes.py.
 """
 
+import argparse
 import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--all-months", action="store_true",
+                    help="Label plots/output for all months (data selection is done in step 1)")
+args = parser.parse_args()
 
 PLOT_DIR = "plots/2profiles"
 os.makedirs(PLOT_DIR, exist_ok=True)
@@ -424,7 +430,7 @@ print(f"Saved {PLOT_DIR}/07_mean_profiles.png")
 
 # Plot 9: NADP type breakdown by airline (airlines with >2 flights/day avg)
 airline_counts = df["airline"].value_counts()
-n_days = 31  # March 2025
+n_days = (df["start"].max() - df["start"].min()).days + 1
 top_airlines = airline_counts[airline_counts > 2 * n_days].index
 df_top_al = df[df["airline"].isin(top_airlines)].copy()
 

@@ -8,12 +8,18 @@ and compute delta scores measuring deviation from the matched standard.
 - Generates visualizations.
 """
 
+import argparse
 import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--all-months", action="store_true",
+                    help="Label plots/output for all months (data selection is done in step 1)")
+args = parser.parse_args()
 
 PLOT_DIR = "plots/4profiles"
 os.makedirs(PLOT_DIR, exist_ok=True)
@@ -599,7 +605,7 @@ print(f"Saved {PLOT_DIR}/08_nadp2_subtypes.png")
 
 # Plot 9: NADP type breakdown by airline (top 15 most common)
 airline_counts = df["airline"].value_counts()
-n_days = 31  # March 2025
+n_days = (df["start"].max() - df["start"].min()).days + 1
 top_airlines = airline_counts[airline_counts > 2 * n_days].index
 df_top_al = df[df["airline"].isin(top_airlines)].copy()
 
