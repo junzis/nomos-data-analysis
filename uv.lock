@@ -6,6 +6,10 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 
+[options]
+exclude-newer = "2026-04-01T08:23:41.03356084Z"
+exclude-newer-span = "P7D"
+
 [[package]]
 name = "altair"
 version = "5.5.0"
