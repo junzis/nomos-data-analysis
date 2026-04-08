@@ -126,7 +126,7 @@ print(f"  Unknown mean:    {unknown['separation_ratio'].mean():.3f}")
 
 # Export results
 result_cols = [
-    "flight_id", "icao_actype", "v2", "nadp_type",
+    "flight_id", "typecode", "callsign", "airline", "start", "v2", "nadp_type",
     "delta_score", "delta_ias_rms",
     "delta_ias_800", "delta_ias_1500", "delta_ias_3000",
     "mean_rocd_800_1500", "mean_rocd_1500_3000",
@@ -356,12 +356,12 @@ print(f"Saved {PLOT_DIR}/05_feature_space.png")
 
 
 # Plot 6: NADP type breakdown by aircraft type (top 15 most common)
-top_types = df["icao_actype"].value_counts().head(15).index
-df_top = df[df["icao_actype"].isin(top_types)].copy()
+top_types = df["typecode"].value_counts().head(15).index
+df_top = df[df["typecode"].isin(top_types)].copy()
 
-ct = pd.crosstab(df_top["icao_actype"], df_top["nadp_type"], normalize="index")
+ct = pd.crosstab(df_top["typecode"], df_top["nadp_type"], normalize="index")
 ct = ct.reindex(columns=["nadp1", "nadp2", "unknown"], fill_value=0)
-ct = ct.loc[ct["nadp2"].sort_values(ascending=False).index]
+ct = ct.loc[reversed(top_types)]
 
 fig, ax = plt.subplots(figsize=(12, 7))
 ct.plot.barh(stacked=True, color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]], ax=ax)
@@ -373,7 +373,7 @@ ax.legend(
     loc="upper center", bbox_to_anchor=(0.5, -0.08),
     ncol=3, frameon=False,
 )
-counts_by_type = df_top["icao_actype"].value_counts()
+counts_by_type = df_top["typecode"].value_counts()
 for i, actype in enumerate(ct.index):
     ax.text(1.02, i, f"n={counts_by_type[actype]}", va="center", fontsize=10)
 ax.set_xlim(0, 1.15)
@@ -420,3 +420,32 @@ plt.suptitle("Mean profiles with IQR by NADP type")
 plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/07_mean_profiles.png", dpi=150)
 print(f"Saved {PLOT_DIR}/07_mean_profiles.png")
+
+
+# Plot 9: NADP type breakdown by airline (airlines with >2 flights/day avg)
+airline_counts = df["airline"].value_counts()
+n_days = 31  # March 2025
+top_airlines = airline_counts[airline_counts > 2 * n_days].index
+df_top_al = df[df["airline"].isin(top_airlines)].copy()
+
+ct_al = pd.crosstab(df_top_al["airline"], df_top_al["nadp_type"], normalize="index")
+ct_al = ct_al.reindex(columns=["nadp1", "nadp2", "unknown"], fill_value=0)
+ct_al = ct_al.loc[reversed(top_airlines)]
+
+fig, ax = plt.subplots(figsize=(12, 13))
+ct_al.plot.barh(stacked=True, color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]], ax=ax)
+ax.set_xlabel("Proportion of flights")
+ax.set_ylabel("Airline (ICAO code)")
+ax.set_title(f"NADP classification by airline ({len(top_airlines)} airlines, >2 flights/day)")
+ax.legend(
+    ["NADP1", "NADP2", "Unknown"],
+    loc="upper center", bbox_to_anchor=(0.5, -0.08),
+    ncol=3, frameon=False,
+)
+counts_by_airline = df_top_al["airline"].value_counts()
+for i, airline in enumerate(ct_al.index):
+    ax.text(1.02, i, f"n={counts_by_airline[airline]}", va="center", fontsize=10)
+ax.set_xlim(0, 1.15)
+plt.tight_layout()
+plt.savefig(f"{PLOT_DIR}/09_airline_breakdown.png", dpi=150, bbox_inches="tight")
+print(f"Saved {PLOT_DIR}/09_airline_breakdown.png")

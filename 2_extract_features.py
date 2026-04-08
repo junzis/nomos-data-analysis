@@ -104,10 +104,16 @@ def extract_flight_features(flight_id, group):
     delta_ias_curve = [v - v2 if not pd.isna(v) else np.nan for v in ias_curve]
 
     actype = group["ICAO_ACTYPE"].iloc[0]
+    callsign = str(group["CALLSIGN"].iloc[0]).strip()
+    airline = callsign[:3]
+    start = airborne["actual_time"].iloc[0]
 
     return {
         "flight_id": flight_id,
-        "icao_actype": actype,
+        "typecode": actype,
+        "callsign": callsign,
+        "airline": airline,
+        "start": start,
         "v2": v2,
         "delta_ias_800": delta_ias_800,
         "delta_ias_1500": delta_ias_1500,

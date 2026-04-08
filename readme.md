@@ -150,6 +150,12 @@ Wide-bodies (B77W, B789) have more NADP1 departures. Narrowbodies (B738, E295, B
 
 ![NADP by aircraft type](plots/2profiles/06_actype_breakdown.png)
 
+### Airline breakdown
+
+Most airlines at Schiphol overwhelmingly follow NADP2. Air France (AFR) stands out with the highest NADP1 proportion among the top 15 airlines. Low-cost carriers (EZY, EJU, RYR) are almost exclusively NADP2:
+
+![NADP by airline](plots/2profiles/09_airline_breakdown.png)
+
 ### Best and worst matches
 
 Three best and three worst flights per type, compared to the reference profiles for IAS and ROCD:
@@ -190,6 +196,8 @@ Most NADP2 departures match the 800 ft variant, consistent with the standard ICA
 
 ![Aircraft type breakdown with sub-types](plots/4profiles/06_actype_breakdown.png)
 
+![Airline breakdown with sub-types](plots/4profiles/09_airline_breakdown.png)
+
 ## Output
 
 `data/nadp_results.csv`, one row per flight:
@@ -197,9 +205,13 @@ Most NADP2 departures match the 800 ft variant, consistent with the standard ICA
 | Column | Description |
 |--------|-------------|
 | `flight_id` | Unique flight identifier |
-| `icao_actype` | Aircraft type code |
+| `typecode` | Aircraft type code (e.g. B738, A320) |
+| `callsign` | Flight callsign (e.g. KLM1234) |
+| `airline` | ICAO airline code (first 3 characters of callsign) |
+| `start` | Departure timestamp (first airborne point) |
 | `v2` | Extracted V2 proxy (kt) |
-| `nadp_type` | `nadp1`, `nadp2`, or `unknown` (2-profile); `nadp1`, `nadp2-800`, `nadp2-1000`, `nadp2-1500`, or `unknown` (4-profile) |
+| `nadp_type` | `nadp1`, `nadp2-800`, `nadp2-1000`, `nadp2-1500`, or `unknown` |
+| `nadp_category` | High-level category: `nadp1`, `nadp2`, or `unknown` |
 | `delta_score` | Normalized RMS deviation from reference (0 = perfect) |
 | `delta_ias_rms` | Raw IAS RMS deviation (kt) |
 | `delta_ias_800` | IAS minus V2 at 800 ft (kt) |

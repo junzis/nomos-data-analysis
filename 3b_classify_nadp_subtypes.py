@@ -163,7 +163,7 @@ print(f"  Unknown mean:    {unknown['separation_ratio'].mean():.3f}")
 
 # Export results
 result_cols = [
-    "flight_id", "icao_actype", "v2", "nadp_type", "nadp_category",
+    "flight_id", "typecode", "callsign", "airline", "start", "v2", "nadp_type", "nadp_category",
     "delta_score", "delta_ias_rms",
     "delta_ias_800", "delta_ias_1500", "delta_ias_3000",
     "mean_rocd_800_1500", "mean_rocd_1500_3000",
@@ -419,20 +419,17 @@ print(f"Saved {PLOT_DIR}/05_feature_space.png")
 
 
 # Plot 6: NADP type breakdown by aircraft type (top 15 most common)
-top_types = df["icao_actype"].value_counts().head(15).index
-df_top = df[df["icao_actype"].isin(top_types)].copy()
+top_types = df["typecode"].value_counts().head(15).index
+df_top = df[df["typecode"].isin(top_types)].copy()
 
 _type_cols = ["nadp1", "nadp2-800", "nadp2-1000", "nadp2-1500", "unknown"]
 _type_display = ["NADP1", "NADP2-800", "NADP2-1000", "NADP2-1500", "Unknown"]
 _type_colors = [PALETTE["nadp1"], SUBTYPE_PALETTE["nadp2-800"], SUBTYPE_PALETTE["nadp2-1000"],
                 SUBTYPE_PALETTE["nadp2-1500"], PALETTE["unknown"]]
 
-ct = pd.crosstab(df_top["icao_actype"], df_top["nadp_type"], normalize="index")
+ct = pd.crosstab(df_top["typecode"], df_top["nadp_type"], normalize="index")
 ct = ct.reindex(columns=_type_cols, fill_value=0)
-# Sort by total NADP2 proportion
-ct["_nadp2_total"] = ct["nadp2-800"] + ct["nadp2-1000"] + ct["nadp2-1500"]
-ct = ct.loc[ct["_nadp2_total"].sort_values(ascending=False).index]
-ct = ct.drop(columns="_nadp2_total")
+ct = ct.loc[reversed(top_types)]
 
 fig, ax = plt.subplots(figsize=(12, 7))
 ct.plot.barh(stacked=True, color=_type_colors, ax=ax)
@@ -444,7 +441,7 @@ ax.legend(
     loc="upper center", bbox_to_anchor=(0.5, -0.08),
     ncol=5, frameon=False,
 )
-counts_by_type = df_top["icao_actype"].value_counts()
+counts_by_type = df_top["typecode"].value_counts()
 for i, actype in enumerate(ct.index):
     ax.text(1.02, i, f"n={counts_by_type[actype]}", va="center", fontsize=10)
 ax.set_xlim(0, 1.15)
@@ -598,3 +595,32 @@ plt.suptitle("NADP2 sub-type analysis (acceleration altitude variants)")
 plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/08_nadp2_subtypes.png", dpi=150)
 print(f"Saved {PLOT_DIR}/08_nadp2_subtypes.png")
+
+
+# Plot 9: NADP type breakdown by airline (top 15 most common)
+airline_counts = df["airline"].value_counts()
+n_days = 31  # March 2025
+top_airlines = airline_counts[airline_counts > 2 * n_days].index
+df_top_al = df[df["airline"].isin(top_airlines)].copy()
+
+ct_al = pd.crosstab(df_top_al["airline"], df_top_al["nadp_type"], normalize="index")
+ct_al = ct_al.reindex(columns=_type_cols, fill_value=0)
+ct_al = ct_al.loc[reversed(top_airlines)]
+
+fig, ax = plt.subplots(figsize=(12, 13))
+ct_al.plot.barh(stacked=True, color=_type_colors, ax=ax)
+ax.set_xlabel("Proportion of flights")
+ax.set_ylabel("Airline (ICAO code)")
+ax.set_title(f"NADP classification by airline ({len(top_airlines)} airlines, >2 flights/day)")
+ax.legend(
+    _type_display,
+    loc="upper center", bbox_to_anchor=(0.5, -0.08),
+    ncol=5, frameon=False,
+)
+counts_by_airline = df_top_al["airline"].value_counts()
+for i, airline in enumerate(ct_al.index):
+    ax.text(1.02, i, f"n={counts_by_airline[airline]}", va="center", fontsize=10)
+ax.set_xlim(0, 1.15)
+plt.tight_layout()
+plt.savefig(f"{PLOT_DIR}/09_airline_breakdown.png", dpi=150, bbox_inches="tight")
+print(f"Saved {PLOT_DIR}/09_airline_breakdown.png")
