@@ -17,7 +17,9 @@ import zipfile
 
 from docx import Document
 from docx.shared import Pt, Cm, Inches, RGBColor, Emu
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from PIL import Image
 
@@ -165,6 +167,31 @@ def post_process(doc, docx_path):
                 run.font.size = Pt(9)
                 run.font.italic = True
                 run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+
+    # Style tables: light gray thin borders, centered
+    for table in doc.tables:
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_table_borders(table, color="BBBBBB", size=4)
+
+
+def _set_table_borders(table, color="BBBBBB", size=4):
+    """Set light gray thin borders on all table cells."""
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr if tbl.tblPr is not None else OxmlElement("w:tblPr")
+
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), str(size))
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), color)
+        borders.append(el)
+
+    # Remove existing borders if any
+    for existing in tbl_pr.findall(qn("w:tblBorders")):
+        tbl_pr.remove(existing)
+    tbl_pr.append(borders)
 
 
 if __name__ == "__main__":

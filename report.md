@@ -242,7 +242,31 @@ The reference profiles are idealized piecewise-linear curves. Real departures sh
 
 The separation ratio thresholds were tuned on Schiphol data. Other airports with different procedure adoption rates or aircraft mixes may need different thresholds. The same applies to the reference profile breakpoints, which assume standard ICAO procedure definitions.
 
-## 6. Conclusion
+## 6. Output data
+
+The classifier produces a single CSV file (`data/nadp_results.csv`) with one row per classified flight. Each row contains the flight metadata, the assigned NADP type, and the quantitative scores used in the classification. The columns are:
+
+| Column | Description |
+|--------|-------------|
+| `flight_id` | Unique flight identifier from the VEMMIS data |
+| `typecode` | ICAO aircraft type designator (e.g. B738, A320) |
+| `callsign` | ATC callsign (e.g. KLM1234) |
+| `airline` | ICAO airline code, extracted as the first 3 characters of the callsign |
+| `start` | Departure timestamp (time of the first airborne surveillance point) |
+| `v2` | Estimated V2 proxy: minimum IAS in the 200 to 800 ft band (kt) |
+| `nadp_type` | Assigned procedure: `nadp1`, `nadp2-800`, `nadp2-1000`, `nadp2-1500`, or `unknown` |
+| `nadp_category` | Simplified label: `nadp1`, `nadp2`, or `unknown` |
+| `delta_score` | Normalized RMS deviation from the matched reference ($d_{\text{matched}} / 30$) |
+| `delta_ias_rms` | Raw RMS deviation from the matched reference (kt) |
+| `delta_ias_800` | IAS minus V2 at 800 ft (kt) |
+| `delta_ias_1500` | IAS minus V2 at 1500 ft (kt) |
+| `delta_ias_3000` | IAS minus V2 at 3000 ft (kt) |
+| `mean_rocd_800_1500` | Mean ROCD between 800 and 1500 ft (ft/min) |
+| `mean_rocd_1500_3000` | Mean ROCD between 1500 and 3000 ft (ft/min) |
+
+The `nadp_type` column gives the fine-grained 4-profile result. For users who only need NADP1 vs NADP2, the `nadp_category` column collapses the three NADP2 sub-types into a single `nadp2` label. The `delta_score` and `delta_ias_rms` columns can be used to filter out poor matches or to study how closely different airlines or aircraft types follow the standard profiles.
+
+## 7. Conclusion
 
 We classified more than 127,000 departures from Amsterdam Schiphol over six months (March to August 2025) into NADP1 and NADP2 using indicated airspeed from Mode S Enhanced Surveillance. The classifier works by comparing each flight's speed profile against piecewise-linear ICAO reference curves and assigning the closest match, with a separation ratio threshold to filter ambiguous cases.
 
