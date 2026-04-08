@@ -18,7 +18,9 @@ nadp2_800 = interp([0, 800, 3000, 3500], [0, 0, 70, 75])
 nadp2_1000 = interp([0, 1000, 3000, 3500], [0, 0, 70, 75])
 nadp2_1500 = interp([0, 1500, 3000, 3500], [0, 0, 70, 75])
 
-fig, ax = plt.subplots(figsize=(10, 8))
+# Single-panel: 20cm wide (renders to 10cm in docx at 2x)
+FIG_W1 = 20 / 2.54  # inches
+fig, ax = plt.subplots(figsize=(FIG_W1, FIG_W1 * 0.75))
 
 # NADP1
 ax.plot(nadp1, alt_grid, color="#4C72B0", lw=3, label="NADP1 (close-in)")

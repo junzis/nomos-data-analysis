@@ -1,8 +1,8 @@
-# NOMOS: Technical report
+# Classifying Noise Abatement Departure Procedures From Mode S Data
 
-**Author:** Junzi Sun
+Junzi Sun
 
-## Introduction
+## 1. Introduction
 
 Aircraft departing from airports near residential areas follow noise abatement departure procedures (NADPs) to reduce noise exposure on the ground. ICAO defines two standard procedures, NADP1 and NADP2, which differ in how the aircraft manages speed and configuration during the initial climb between 800 and 3000 ft.
 
@@ -12,7 +12,7 @@ In NADP2 (distant noise reduction), the aircraft begins accelerating and retract
 
 Below 800 ft, both procedures are identical: the aircraft climbs at V2 + 10 to 20 kt in takeoff configuration. Above 3000 ft, both converge to the same clean configuration and accelerated speed. The difference is entirely in the 800 to 3000 ft band, and it shows up most clearly in the speed profile: NADP1 stays flat, NADP2 ramps up.
 
-![ICAO NADP reference speed profiles](plots/00_reference_profiles.png)
+![Figure 1: ICAO NADP reference speed profiles](plots/00_reference_profiles.png)
 
 The NADP procedures are defined in ICAO Doc 8168 (PANS-OPS), Volume I, Part I, Section 7, Chapter 3 (ICAO, 2018). ICAO Circular 317 (ICAO, 2010) provides further analysis of the four NADP variants and their effects on noise and emissions.
 
@@ -24,7 +24,7 @@ The approach in this research instead uses Mode S Enhanced Surveillance (EHS) da
 
 Our results show 97.5% NADP2 adoption among classified flights. The higher proportion compared to the reported 80% is probably a combination of the longer study period (six months vs. typical snapshots of days or weeks), the fact that speed-based classification resolves flights that altitude-based methods would leave ambiguous, and possible growth in NADP2 adoption over time.
 
-## Data
+## 2. Data
 
 We use VEMMIS enhanced surveillance data from Amsterdam Schiphol Airport, covering March through August 2025 (184 days). VEMMIS is the surveillance data system operated by LVNL (Air Traffic Control the Netherlands) that records Mode S Enhanced Surveillance (EHS) parameters. Unlike standard ADS-B, which provides ground speed and barometric altitude, Mode S EHS downlinks parameters directly from the aircraft's flight management system, including indicated airspeed (IAS), Mach number, true airspeed (TAS), magnetic heading, and barometric rate of climb/descent (ROCD).
 
@@ -47,13 +47,13 @@ Several parameters that are relevant to departure performance are not publicly o
 
 We filter the data to EHAM departures only, keep the first 500 seconds of each flight's climb, and retain only flights that reach 5000 ft within that window and have at least 10 surveillance points below 5000 ft. The feature extraction step further requires each flight to reach at least 3000 ft. After these filters, the dataset contains 127,237 flights across 131 aircraft types and 615 airline callsign prefixes.
 
-## Method
+## 3. Method
 
-### V2 extraction
+### 3.1 V2 extraction
 
 V2 (takeoff safety speed) is different for every flight because it depends on weight, flap setting, and temperature. We approximate V2 as the minimum IAS in the 200 to 800 ft altitude band. This is the stabilized initial climb speed after the pitch-up transient that follows rotation, and it gives us a consistent baseline for computing speed deltas across flights. Flights with V2 outside 80 to 250 kt are dropped as invalid.
 
-### Why speed only, not climb rate
+### 3.2 Why speed only, not climb rate
 
 We classify on indicated airspeed alone and ignore ROCD entirely, for three reasons.
 
@@ -67,7 +67,7 @@ We confirmed this empirically: including ROCD in the classification metric produ
 
 ROCD is still computed and shown in the plots for comparison.
 
-### Reference profiles
+### 3.3 Reference profiles
 
 Each reference profile is a piecewise-linear function of altitude, defining the expected speed excess above V2 (i.e., $\Delta\text{IAS} = \text{IAS} - V_2$) at every altitude. These are sampled onto a regular grid at 100 ft intervals from 200 to 3500 ft ($N = 34$ altitude points):
 
@@ -80,9 +80,9 @@ Between breakpoints, values are linearly interpolated. The grid is capped at 350
 
 The figure below shows 200 sample flight profiles per type. Top row: IAS minus V2 versus altitude, with the reference curves in black. Bottom row: the corresponding ROCD profiles. The speed separation between NADP1 and NADP2 is clear in the top row. In the ROCD row, the scatter within each group is much larger than the difference between groups. The NADP2 ROCD dip around 1000 to 1500 ft is where the aircraft trades climb rate for speed during flap retraction:
 
-![Speed and ROCD profiles vs reference](plots/2profiles/02_speed_profiles_vs_reference.png)
+![Figure 2: Speed and ROCD profiles vs reference](plots/2profiles/02_speed_profiles_vs_reference.png)
 
-### Classification (2-profile)
+### 3.4 Classification (2-profile)
 
 For each flight, we compute the RMS distance between its observed speed profile and each reference profile. Let $\mathbf{f} = (f_1, \ldots, f_N)$ be the flight's $\Delta\text{IAS}$ values at the altitude grid points where data is available, and let $\mathbf{r}^{(k)}$ be the corresponding reference values for profile $k$. The distance to reference $k$ is:
 
@@ -102,13 +102,13 @@ $$\text{type} = \begin{cases} \text{NADP1} & \text{if } d_1 < d_2 \text{ and } \
 
 The feature space projection below shows the result of this classification. Each point is a flight plotted by its $\Delta\text{IAS}$ at 1500 ft and 3000 ft. The two ICAO reference points are marked with stars. NADP1 flights cluster near the origin; NADP2 flights spread along the acceleration axis:
 
-![Classification feature space](plots/2profiles/05_feature_space.png)
+![Figure 3: Classification feature space](plots/2profiles/05_feature_space.png)
 
 The separation ratio distribution confirms that most classified flights have ratios well below 0.6, meaning an unambiguous match. Flights above the threshold end up as "unknown":
 
-![Separation ratio distribution](plots/2profiles/03_separation_ratio.png)
+![Figure 4: Separation ratio distribution](plots/2profiles/03_separation_ratio.png)
 
-### Delta score
+### 3.5 Delta score
 
 After classification, the delta score quantifies how well a flight follows its matched reference. It is the same RMS distance $d_k$ to the assigned reference, normalized by 30 kt:
 
@@ -120,11 +120,11 @@ The mean delta score is 0.231 for NADP1 flights (6.9 kt RMS) and 0.398 for NADP2
 
 The figure below shows three best-matching and three worst-matching flights per type, compared against the reference profiles:
 
-![Best vs worst reference comparison](plots/2profiles/04_reference_comparison.png)
+![Figure 5: Best vs worst reference comparison](plots/2profiles/04_reference_comparison.png)
 
 The worst NADP1 matches tend to be heavy wide-body variants whose speed profiles start accelerating before 3000 ft rather than holding flat. The worst NADP2 matches are typically lighter aircraft with low V2 values that accelerate well beyond the reference curve, reaching 80 to 100 kt above V2.
 
-### Extended classification (4-profile)
+### 3.6 Extended classification (4-profile)
 
 The higher NADP2 deltas suggest that a single NADP2 reference is too coarse. Real departures show a range of acceleration start altitudes. The extended classifier addresses this by introducing three NADP2 sub-types:
 
@@ -142,7 +142,7 @@ All three variants reach approximately $V_2 + 70$ kt by 3000 ft. The NADP1 refer
 
 The figure below shows sample flight traces against these four references. The three NADP2 variants differ in when acceleration begins but converge by 3000 ft:
 
-![Speed and ROCD profiles by sub-type](plots/4profiles/02_speed_profiles_vs_reference.png)
+![Figure 6: Speed and ROCD profiles by sub-type](plots/4profiles/02_speed_profiles_vs_reference.png)
 
 The RMS distance $d_k$ is computed to all four references. Classification proceeds in two steps:
 
@@ -156,15 +156,15 @@ The stricter threshold for NADP1 ($\tau_1 = 0.4$) is because NADP1 flights clust
 
 The feature space projection shows how flights distribute across the four profiles. The sub-types form a continuum rather than discrete clusters:
 
-![Feature space with NADP2 sub-types](plots/4profiles/05_feature_space.png)
+![Figure 7: Feature space with NADP2 sub-types](plots/4profiles/05_feature_space.png)
 
 The separation ratio distributions show the effect of the asymmetric thresholds. NADP1 flights are tightly clustered below 0.4; NADP2 flights spread broadly but most fall below 0.9:
 
-![Separation ratio by sub-type](plots/4profiles/03_separation_ratio.png)
+![Figure 8: Separation ratio by sub-type](plots/4profiles/03_separation_ratio.png)
 
-## Results
+## 4. Results
 
-### Overall classification
+### 4.1 Overall classification
 
 127,237 EHAM departures from March to August 2025:
 
@@ -176,37 +176,37 @@ The separation ratio distributions show the effect of the asymmetric thresholds.
 
 Among classified flights, 97.5% follow NADP2.
 
-### Departure trajectories
+### 4.2 Departure trajectories
 
 NADP1 flights climb more steeply. NADP2 flights have a more gradual, consistent altitude profile:
 
-![Departure trajectories by NADP type](plots/2profiles/01_trajectories_by_nadp.png)
+![Figure 9: Departure trajectories by NADP type](plots/2profiles/01_trajectories_by_nadp.png)
 
-### Mean profiles
+### 4.3 Mean profiles
 
 Mean speed and ROCD with interquartile range. The two procedures separate cleanly, and the ICAO reference curves sit close to the observed means:
 
-![Mean profiles with IQR](plots/2profiles/07_mean_profiles.png)
+![Figure 10: Mean profiles with IQR](plots/2profiles/07_mean_profiles.png)
 
-### Threshold sensitivity
+### 4.4 Threshold sensitivity
 
 The separation ratio threshold controls how strict the classifier is. Lower thresholds push more flights into "unknown"; higher thresholds classify more aggressively at the risk of misassignment. We use 0.6 as a balance between coverage and confidence:
 
-![Threshold sensitivity](plots/2profiles/03b_threshold_sensitivity.png)
+![Figure 11: Threshold sensitivity](plots/2profiles/03b_threshold_sensitivity.png)
 
-### Aircraft type breakdown
+### 4.5 Aircraft type breakdown
 
 Wide-bodies (B77W, B789) have more NADP1 departures. Narrowbodies (B738, E295, B737) are almost all NADP2. This probably reflects airline fleet-wide procedure assignments rather than aircraft capability differences:
 
-![NADP by aircraft type](plots/2profiles/06_actype_breakdown.png)
+![Figure 12: NADP by aircraft type](plots/2profiles/06_actype_breakdown.png)
 
-### Airline breakdown
+### 4.6 Airline breakdown
 
 Most airlines at Schiphol are overwhelmingly NADP2. Air France (AFR) has the highest NADP1 proportion. Low-cost carriers (EZY, EJU, RYR) are almost exclusively NADP2. The NADP1 usage among long-haul carriers (QTR, DAL, UAE, UAL) probably comes from the wide-body effect seen in the aircraft type breakdown:
 
-![NADP by airline](plots/2profiles/09_airline_breakdown.png)
+![Figure 13: NADP by airline](plots/2profiles/09_airline_breakdown.png)
 
-### NADP2 sub-types
+### 4.7 NADP2 sub-types
 
 | Category | Flights | Percentage |
 |----------|---------|------------|
@@ -220,17 +220,17 @@ Most NADP2 departures (60.9%) match the standard 800 ft variant. The sub-type di
 
 Mean sub-type profiles with IQR bands, distance-indexed altitude profiles, and sub-type distribution:
 
-![NADP2 sub-type profiles and distribution](plots/4profiles/08_nadp2_subtypes.png)
+![Figure 14: NADP2 sub-type profiles and distribution](plots/4profiles/08_nadp2_subtypes.png)
 
-### Sub-type breakdowns by aircraft type and airline
+### 4.8 Sub-type breakdowns by aircraft type and airline
 
 The sub-type distribution varies by aircraft type and airline, with some operators showing a preference for later acceleration:
 
-![Aircraft type breakdown with sub-types](plots/4profiles/06_actype_breakdown.png)
+![Figure 15: Aircraft type breakdown with sub-types](plots/4profiles/06_actype_breakdown.png)
 
-![Airline breakdown with sub-types](plots/4profiles/09_airline_breakdown.png)
+![Figure 16: Airline breakdown with sub-types](plots/4profiles/09_airline_breakdown.png)
 
-## Limitations
+## 5. Limitations
 
 The V2 proxy (minimum IAS in the 200 to 800 ft band) is an approximation. The actual V2 from aircraft performance tables depends on exact takeoff weight, flap setting, and temperature, none of which are available in the surveillance data. Our proxy captures the stabilized climb speed rather than V2 itself, but the difference is small and consistent across flights, so it works as a baseline for relative speed comparisons.
 
@@ -242,7 +242,7 @@ The reference profiles are idealized piecewise-linear curves. Real departures sh
 
 The separation ratio thresholds were tuned on Schiphol data. Other airports with different procedure adoption rates or aircraft mixes may need different thresholds. The same applies to the reference profile breakpoints, which assume standard ICAO procedure definitions.
 
-## Conclusion
+## 6. Conclusion
 
 We classified more than 127,000 departures from Amsterdam Schiphol over six months (March to August 2025) into NADP1 and NADP2 using indicated airspeed from Mode S Enhanced Surveillance. The classifier works by comparing each flight's speed profile against piecewise-linear ICAO reference curves and assigning the closest match, with a separation ratio threshold to filter ambiguous cases.
 

@@ -24,6 +24,12 @@ os.makedirs(PLOT_DIR, exist_ok=True)
 sns.set_theme(style="whitegrid", font_scale=1.2)
 PALETTE = {"nadp1": "#4C72B0", "nadp2": "#DD5145", "unknown": "#999999"}
 
+# Figure sizes: generate at 2x target docx width for crisp rendering
+# Single-panel figures: 10cm in docx -> 20cm generation
+# Multi-panel figures: 18cm in docx -> 36cm generation
+FIG_W1 = 20 / 2.54  # ~7.9 inches
+FIG_W2 = 36 / 2.54  # ~14.2 inches
+
 # --- ICAO Reference Speed Profiles ---
 ALT_GRID = np.arange(200, 3600, 100)
 
@@ -151,7 +157,7 @@ def _plot_trajectories(ax, flight_ids_df, df_raw, color, max_n=200):
         keep = ts <= 300
         ax.plot(ts[keep], fdata["ALT"][keep], lw=0.5, color=color, alpha=0.2)
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), sharey=True, sharex=True)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(FIG_W2, FIG_W2 * 0.43), sharey=True, sharex=True)
 
 _plot_trajectories(ax1, nadp1, df_raw, PALETTE["nadp1"])
 ax1.set_xlabel("Time from liftoff (s)")
@@ -170,7 +176,7 @@ print(f"Saved {PLOT_DIR}/01_trajectories_by_nadp.png")
 
 
 # Plot 2: IAS and ROCD vs altitude (2x2: top=IAS, bottom=ROCD)
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharey=True)
+fig, axes = plt.subplots(2, 2, figsize=(FIG_W2, FIG_W2 * 0.71), sharey=True)
 
 nadp1_sample = nadp1.sample(min(200, len(nadp1)), random_state=42)
 nadp2_sample = nadp2.sample(min(200, len(nadp2)), random_state=42)
@@ -215,7 +221,7 @@ print(f"Saved {PLOT_DIR}/02_speed_profiles_vs_reference.png")
 
 # Plot 3: Separation ratio distribution (separate subplots per type)
 TYPE_ORDER = ["nadp1", "nadp2", "unknown"]
-fig, axes = plt.subplots(len(TYPE_ORDER), 1, figsize=(10, 7), sharex=True, sharey=True)
+fig, axes = plt.subplots(len(TYPE_ORDER), 1, figsize=(FIG_W1, FIG_W1 * 0.9), sharex=True, sharey=True)
 for ax, label in zip(axes, TYPE_ORDER):
     subset = df[df["nadp_type"] == label]["separation_ratio"].dropna()
     sns.histplot(subset, bins=50, color=PALETTE[label], ax=ax)
@@ -232,7 +238,7 @@ print(f"Saved {PLOT_DIR}/03_separation_ratio.png")
 
 # Plot 3b: Threshold sensitivity
 thresholds = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharey=True)
+fig, axes = plt.subplots(2, 3, figsize=(FIG_W2, FIG_W2 * 0.56), sharey=True)
 
 # Reuse precomputed distances for vectorized threshold sweep
 _ratio = df["separation_ratio"].values
@@ -268,7 +274,7 @@ print(f"Saved {PLOT_DIR}/03b_threshold_sensitivity.png")
 
 
 # Plot 4: Example flights vs reference (3 best + 3 worst per category, IAS + ROCD)
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharey=True)
+fig, axes = plt.subplots(2, 2, figsize=(FIG_W2, FIG_W2 * 0.71), sharey=True)
 
 for col_idx, (cat_label, cat_df) in enumerate([("NADP1", nadp1), ("NADP2", nadp2)]):
     valid = cat_df.dropna(subset=["delta_score"]).sort_values("delta_score")
@@ -312,7 +318,7 @@ print(f"Saved {PLOT_DIR}/04_reference_comparison.png")
 
 
 # Plot 5: Classification feature space (delta_ias_1500 vs delta_ias_3000)
-fig, ax = plt.subplots(figsize=(10, 8))
+fig, ax = plt.subplots(figsize=(FIG_W1, FIG_W1 * 0.8))
 _max_scatter = 5000
 for label in ["unknown", "nadp1", "nadp2"]:
     subset = df[df["nadp_type"] == label]
@@ -348,7 +354,7 @@ ct = pd.crosstab(df_top["typecode"], df_top["nadp_type"], normalize="index")
 ct = ct.reindex(columns=["nadp1", "nadp2", "unknown"], fill_value=0)
 ct = ct.loc[reversed(top_types)]
 
-fig, ax = plt.subplots(figsize=(12, 7))
+fig, ax = plt.subplots(figsize=(FIG_W2, FIG_W2 * 0.5))
 ct.plot.barh(stacked=True, color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]], ax=ax)
 ax.set_xlabel("Proportion of flights")
 ax.set_ylabel("Aircraft type")
@@ -368,7 +374,7 @@ print(f"Saved {PLOT_DIR}/06_actype_breakdown.png")
 
 
 # Plot 7: Mean IAS and ROCD profiles by NADP category with confidence bands
-fig, (ax_ias, ax_rocd) = plt.subplots(1, 2, figsize=(16, 8), sharey=True)
+fig, (ax_ias, ax_rocd) = plt.subplots(1, 2, figsize=(FIG_W2, FIG_W2 * 0.5), sharey=True)
 
 for label in ["nadp1", "nadp2"]:
     subset = df[df["nadp_type"] == label]
@@ -417,14 +423,14 @@ ct_al = pd.crosstab(df_top_al["airline"], df_top_al["nadp_type"], normalize="ind
 ct_al = ct_al.reindex(columns=["nadp1", "nadp2", "unknown"], fill_value=0)
 ct_al = ct_al.loc[reversed(top_airlines)]
 
-fig, ax = plt.subplots(figsize=(12, 13))
+fig, ax = plt.subplots(figsize=(FIG_W2, FIG_W2 * 0.9))
 ct_al.plot.barh(stacked=True, color=[PALETTE["nadp1"], PALETTE["nadp2"], PALETTE["unknown"]], ax=ax)
 ax.set_xlabel("Proportion of flights")
 ax.set_ylabel("Airline (ICAO code)")
 ax.set_title(f"NADP classification by airline ({len(top_airlines)} airlines, >2 flights/day)")
 ax.legend(
     ["NADP1", "NADP2", "Unknown"],
-    loc="upper center", bbox_to_anchor=(0.5, -0.08),
+    loc="upper center", bbox_to_anchor=(0.5, -0.04),
     ncol=3, frameon=False,
 )
 counts_by_airline = df_top_al["airline"].value_counts()

@@ -12,5 +12,8 @@ dist/
 wheels/
 *.egg-info
 
+# Generated reports
+*.docx
+
 # Virtual environments
 .venv
