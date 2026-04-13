@@ -28,6 +28,8 @@ Our results show 97.5% NADP2 adoption among classified flights. The higher propo
 
 We use VEMMIS enhanced surveillance data from Amsterdam Schiphol Airport, covering March through August 2025 (184 days). VEMMIS is the surveillance data system operated by LVNL (Air Traffic Control the Netherlands) that records Mode S Enhanced Surveillance (EHS) parameters. Unlike standard ADS-B, which provides ground speed and barometric altitude, Mode S EHS downlinks parameters directly from the aircraft's flight management system, including indicated airspeed (IAS), Mach number, true airspeed (TAS), magnetic heading, and barometric rate of climb/descent (ROCD).
 
+Surveillance points are recorded at a fixed 4.8-second update interval (approximately 0.21 Hz), matching the radar rotation period. Occasional gaps appear at integer multiples of 4.8 s when individual sweeps miss a return, but over 99% of consecutive samples are spaced within 4.8 ± 0.1 s. This gives a median of 20 samples per flight (5th–95th percentile: 16–26) during the 200–3500 ft climb window used for classification.
+
 The input consists of daily CSV files, one per day, with each row representing a single surveillance point. The relevant columns are:
 
 | Column | Description |
